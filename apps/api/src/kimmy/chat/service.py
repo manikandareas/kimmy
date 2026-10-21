@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
-from uuid import UUID
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
 import procrastinate
 from sqlalchemy import text
@@ -9,19 +9,22 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kimmy.agent.context import AgentContext
 from kimmy.chat.activity import project_activity
-from kimmy.chat.models import Message, Thread
+from kimmy.chat.models import Message, Run, RunCommand, Thread
+from kimmy.chat.ownership import require_owner
 from kimmy.chat.repository import ChatRepository
 from kimmy.chat.schemas import (
     Admission,
     EventPage,
     EventView,
     MessageView,
+    RunCommandRequest,
     RunView,
     SendMessage,
     Snapshot,
     ThreadPage,
     ThreadView,
 )
+from kimmy.config import get_settings
 from kimmy.errors import DomainError
 from kimmy.jobs.queue import enqueue_run
 from kimmy.knowledge.schemas import Citation
@@ -100,7 +103,9 @@ class ChatService:
             replay = await repo.replay(thread_id, request.request_key)
             if replay is not None:
                 run, message = replay
-                if message.content != request.content:
+                if message.content != request.content or (
+                    request.provider is not None and run.provider != request.provider
+                ):
                     raise DomainError(
                         409,
                         "REQUEST_KEY_CONFLICT",
@@ -113,8 +118,15 @@ class ChatService:
                     "THREAD_BUSY",
                     "Wait for the active run before sending another message",
                 )
+            settings = get_settings()
+            provider = request.provider or settings.chat_provider
+            model = (
+                settings.openai_chat_model
+                if provider == "openai"
+                else settings.openrouter_chat_model
+            )
             run, message = await repo.create_run(
-                thread, request.request_key, request.content
+                thread, request.request_key, request.content, provider, model
             )
             await repo.append_event(
                 thread,
@@ -199,12 +211,17 @@ class ChatService:
                 has_more=len(events) > limit,
             )
 
-    async def claim(self, thread_id: UUID, user_id: str, run_id: UUID) -> bool:
+    async def claim(self, thread_id: UUID, user_id: str, run_id: UUID) -> UUID | None:
         async with self.repository() as repo:
             thread = await self.require_thread(repo, thread_id, user_id, lock=True)
             run = await repo.run(run_id, thread_id)
             if run is None or run.status != "queued":
-                return False
+                return None
+            if run.attempts >= 3:
+                return None
+            run.attempts += 1
+            run.owner_token = uuid4()
+            run.lease_until = datetime.now(UTC) + timedelta(seconds=30)
             run.status = "running"
             run.started_at = datetime.now(UTC)
             await repo.append_event(
@@ -213,16 +230,24 @@ class ChatService:
                 "run.running",
                 {"run": RunView.model_validate(run).model_dump(mode="json")},
             )
-            return True
+            return run.owner_token
 
     async def fail(
-        self, thread_id: UUID, user_id: str, run_id: UUID, code: str
+        self, thread_id: UUID, user_id: str, run_id: UUID, code: str, token: UUID
     ) -> None:
         async with self.repository() as repo:
             thread = await self.require_thread(repo, thread_id, user_id, lock=True)
             run = await repo.run(run_id, thread_id)
             if run is None or run.status != "running":
                 return
+            if (
+                run.owner_token != token
+                or run.lease_until is None
+                or run.lease_until <= datetime.now(UTC)
+            ):
+                return
+            run.owner_token = None
+            run.lease_until = None
             run.status = "failed"
             run.error_code = code
             run.finished_at = datetime.now(UTC)
@@ -234,22 +259,38 @@ class ChatService:
             )
 
     async def execution_input(
-        self, thread_id: UUID, user_id: str, run_id: UUID
+        self, thread_id: UUID, user_id: str, run_id: UUID, token: UUID
     ) -> tuple[AgentContext, str, str | None]:
         async with self.repository() as repo:
             state = await MemoryRepository(repo.session).lock(user_id)
-            thread = await self.require_thread(repo, thread_id, user_id)
+            thread = await self.require_thread(repo, thread_id, user_id, lock=True)
             run = await repo.run(run_id, thread_id)
-            if run is None or run.status != "running":
-                raise DomainError(409, "RUN_NOT_RUNNING", "Run is not running")
+            require_owner(run, token)
+            assert run is not None
+            resume = bool(
+                run.resume_checkpoint_id and run.memory_generation == state.generation
+            )
+            if not resume:
+                run.resume_checkpoint_id = None
             run.memory_generation = state.generation
             message = await repo.input_message(run)
             return (
                 AgentContext(
-                    thread.user_id, thread.id, run.id, message.id, state.generation
+                    thread.user_id,
+                    thread.id,
+                    run.id,
+                    message.id,
+                    state.generation,
+                    reset_history=run.reset_history,
+                    owner_token=token,
+                    resume=resume,
+                    provider=run.provider,
+                    model=run.model,
                 ),
                 message.content,
-                await repo.completed_checkpoint(thread_id, state.generation),
+                run.resume_checkpoint_id
+                if resume
+                else await repo.completed_checkpoint(thread_id, state.generation),
             )
 
     async def progress(
@@ -262,8 +303,8 @@ class ChatService:
                 repo, context.thread_id, context.user_id, lock=True
             )
             run = await repo.run(context.run_id, context.thread_id)
-            if run is None or run.status != "running":
-                raise DomainError(409, "RUN_NOT_RUNNING", "Run is not running")
+            require_owner(run, context.owner_token)
+            assert run is not None
             await repo.append_event(thread, run, kind, payload)
 
     async def complete(
@@ -280,8 +321,8 @@ class ChatService:
                 repo, context.thread_id, context.user_id, lock=True
             )
             run = await repo.run(context.run_id, context.thread_id)
-            if run is None or run.status != "running":
-                raise DomainError(409, "RUN_NOT_RUNNING", "Run is not running")
+            require_owner(run, context.owner_token)
+            assert run is not None
             answer = await repo.create_answer(
                 thread, content, [c.model_dump(mode="json") for c in citations]
             )
@@ -295,6 +336,8 @@ class ChatService:
             # A mutation turn may itself quote revoked content. Do not carry
             # that turn into the next model context; UI history stays intact.
             run.checkpoint_id = None if context.reset_history else checkpoint_id
+            run.owner_token = None
+            run.lease_until = None
             run.status = "completed"
             run.finished_at = datetime.now(UTC)
             await repo.append_event(
@@ -303,3 +346,121 @@ class ChatService:
                 "run.completed",
                 {"run": RunView.model_validate(run).model_dump(mode="json")},
             )
+
+    async def heartbeat(
+        self, thread_id: UUID, user_id: str, run_id: UUID, token: UUID
+    ) -> None:
+        async with self.repository() as repo:
+            await self.require_thread(repo, thread_id, user_id, lock=True)
+            run = await repo.run(run_id, thread_id)
+            require_owner(run, token)
+            assert run is not None
+            run.lease_until = datetime.now(UTC) + timedelta(seconds=30)
+
+    async def command(
+        self,
+        thread_id: UUID,
+        user_id: str,
+        run_id: UUID,
+        kind: str,
+        request: RunCommandRequest,
+    ) -> RunView:
+        async with self.repository() as repo:
+            thread = await self.require_thread(repo, thread_id, user_id, lock=True)
+            run = await repo.run(run_id, thread_id)
+            if run is None:
+                raise DomainError(404, "RUN_NOT_FOUND", "Run not found")
+            prior = await repo.command(run_id, request.request_key)
+            if prior:
+                if (
+                    prior.kind != kind
+                    or prior.expected_attempt != request.expected_attempt
+                ):
+                    raise DomainError(
+                        409, "REQUEST_KEY_CONFLICT", "Command key payload differs"
+                    )
+                return RunView.model_validate(run)
+            if run.attempts != request.expected_attempt:
+                raise DomainError(409, "RUN_CHANGED", "Reload the current attempt")
+            if kind == "cancel":
+                if run.status in {"queued", "running"}:
+                    run.status = "cancelled"
+                    run.error_code = "RUN_CANCELLED"
+                    run.owner_token = None
+                    run.lease_until = None
+                    run.finished_at = datetime.now(UTC)
+                    await self.run_event(repo, thread, run)
+            else:
+                latest = await repo.latest_run(thread_id)
+                if (
+                    run.status not in {"failed", "cancelled"}
+                    or not latest
+                    or latest.id != run.id
+                ):
+                    raise DomainError(
+                        409,
+                        "RUN_NOT_RETRYABLE",
+                        "Only the latest failed or cancelled run can retry",
+                    )
+                if await repo.active_run(thread_id):
+                    raise DomainError(
+                        409, "THREAD_BUSY", "Thread already has an active run"
+                    )
+                if run.attempts >= 3:
+                    raise DomainError(
+                        409,
+                        "RUN_ATTEMPTS_EXHAUSTED",
+                        "Maximum of three attempts reached",
+                    )
+                # Explicit retries start afresh from the last published checkpoint.
+                run.resume_checkpoint_id = None
+                await self.requeue(repo, thread, run)
+            repo.session.add(
+                RunCommand(
+                    run_id=run.id,
+                    request_key=request.request_key,
+                    kind=kind,
+                    expected_attempt=request.expected_attempt,
+                )
+            )
+            return RunView.model_validate(run)
+
+    async def run_event(self, repo: ChatRepository, thread: Thread, run: Run) -> None:
+        await repo.append_event(
+            thread,
+            run,
+            f"run.{run.status}",
+            {"run": RunView.model_validate(run).model_dump(mode="json")},
+        )
+
+    async def requeue(self, repo: ChatRepository, thread: Thread, run: Run) -> None:
+        run.status = "queued"
+        run.error_code = None
+        run.finished_at = None
+        run.owner_token = None
+        run.lease_until = None
+        await self.run_event(repo, thread, run)
+        await enqueue_run(self.queue, repo.session, run.id, thread.id, thread.user_id)
+
+    async def recover(self) -> None:
+        async with self.repository(read_only=True) as repo:
+            stale = await repo.stale_runs()
+        for run_id, thread_id, user_id in stale:
+            async with self.repository() as repo:
+                thread = await self.require_thread(repo, thread_id, user_id, lock=True)
+                run = await repo.run(run_id, thread_id)
+                if (
+                    run is None
+                    or run.status != "running"
+                    or (run.lease_until and run.lease_until > datetime.now(UTC))
+                ):
+                    continue
+                run.owner_token = None
+                run.lease_until = None
+                if run.attempts >= 3:
+                    run.status = "failed"
+                    run.error_code = "WORKER_RECOVERY_EXHAUSTED"
+                    run.finished_at = datetime.now(UTC)
+                    await self.run_event(repo, thread, run)
+                else:
+                    await self.requeue(repo, thread, run)

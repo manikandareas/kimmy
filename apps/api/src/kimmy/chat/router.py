@@ -9,6 +9,9 @@ from kimmy.chat.schemas import (
     CreateThread,
     Cursor,
     EventPage,
+    ModelOption,
+    ModelOptions,
+    RunCommandRequest,
     RunView,
     SendMessage,
     Snapshot,
@@ -17,6 +20,7 @@ from kimmy.chat.schemas import (
 )
 from kimmy.chat.service import ChatService
 from kimmy.chat.stream import stream_events
+from kimmy.config import get_settings
 from kimmy.dependencies import DemoIdentity, get_demo_identity
 from kimmy.errors import DomainError, ErrorResponse
 
@@ -135,3 +139,53 @@ async def stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/models")
+async def models() -> ModelOptions:
+    settings = get_settings()
+    return ModelOptions(
+        default_provider=settings.chat_provider,
+        models=[
+            ModelOption(
+                provider="openai",
+                model=settings.openai_chat_model,
+                label="GPT Luna",
+                available=bool(
+                    settings.openai_api_key
+                    and settings.openai_api_key.get_secret_value().strip()
+                ),
+            ),
+            ModelOption(
+                provider="openrouter",
+                model=settings.openrouter_chat_model,
+                label="DeepSeek",
+                available=bool(
+                    settings.openrouter_api_key
+                    and settings.openrouter_api_key.get_secret_value().strip()
+                ),
+            ),
+        ],
+    )
+
+
+@router.post("/threads/{thread_id}/runs/{run_id}/cancel")
+async def cancel_run(
+    thread_id: UUID,
+    run_id: UUID,
+    body: RunCommandRequest,
+    identity: Identity,
+    service: Service,
+) -> RunView:
+    return await service.command(thread_id, identity.user_id, run_id, "cancel", body)
+
+
+@router.post("/threads/{thread_id}/runs/{run_id}/retry", status_code=202)
+async def retry_run(
+    thread_id: UUID,
+    run_id: UUID,
+    body: RunCommandRequest,
+    identity: Identity,
+    service: Service,
+) -> RunView:
+    return await service.command(thread_id, identity.user_id, run_id, "retry", body)

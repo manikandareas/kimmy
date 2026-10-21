@@ -13,6 +13,7 @@ export const eventKinds = [
   "run.running",
   "run.completed",
   "run.failed",
+  "run.cancelled",
   "agent.text_delta",
   "tool.requested",
   "tool.completed",
@@ -45,6 +46,12 @@ export function applyEvent(state: Snapshot, event: ChatEvent): Snapshot {
       };
       next.activities!.push(activity);
     }
+    if (event.kind === "run.queued")
+      next.activities = next.activities!.map((a) =>
+        a.run_id === run.id
+          ? { ...a, text: "", tools: [], model_message_id: null }
+          : a,
+      );
     if (!next.active_run)
       next.activities = next.activities!.map((a) =>
         a.run_id === run.id

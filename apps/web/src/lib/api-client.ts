@@ -1,4 +1,11 @@
 const messages: Record<string, string> = {
+  RUN_CHANGED: "Status respons sudah berubah. Coba lagi setelah diperbarui.",
+  RUN_NOT_RETRYABLE: "Respons ini tidak dapat dicoba ulang. Kirim pesan baru.",
+  RUN_ATTEMPTS_EXHAUSTED: "Batas tiga percobaan tercapai. Kirim pesan baru.",
+  WORKER_RECOVERY_EXHAUSTED:
+    "Proses terhenti berulang kali. Kirim pesan baru untuk melanjutkan.",
+  AGENT_NOT_CONFIGURED:
+    "Model ini belum dikonfigurasi. Pilih model lain untuk pesan baru.",
   MEMORY_DUPLICATE: "Catatan yang sama sudah tersimpan.",
   MEMORY_CAPACITY:
     "Delapan catatan sudah aktif. Edit atau lupakan salah satunya terlebih dahulu.",

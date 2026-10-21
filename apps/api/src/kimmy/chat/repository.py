@@ -1,10 +1,10 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kimmy.chat.models import Event, Message, Run, Thread
+from kimmy.chat.models import Event, Message, Run, RunCommand, Thread
 
 
 class ChatRepository:
@@ -150,7 +150,12 @@ class ChatRepository:
                     Event.run_id.in_([run.id for run in runs]),
                     Event.seq <= through_seq,
                     Event.kind.in_(
-                        ("agent.text_delta", "tool.requested", "tool.completed")
+                        (
+                            "run.queued",
+                            "agent.text_delta",
+                            "tool.requested",
+                            "tool.completed",
+                        )
                     ),
                 )
                 .order_by(Event.seq)
@@ -159,7 +164,7 @@ class ChatRepository:
         return runs, events
 
     async def create_run(
-        self, thread: Thread, request_key: str, content: str
+        self, thread: Thread, request_key: str, content: str, provider: str, model: str
     ) -> tuple[Run, Message]:
         message = Message(
             thread_id=thread.id, seq=thread.last_seq + 1, role="user", content=content
@@ -171,6 +176,8 @@ class ChatRepository:
             message_id=message.id,
             request_key=request_key,
             status="queued",
+            provider=provider,
+            model=model,
         )
         self.session.add(run)
         await self.session.flush()
@@ -193,3 +200,18 @@ class ChatRepository:
             )
         )
         await self.session.flush()
+
+    async def stale_runs(self) -> list[tuple[UUID, UUID, str]]:
+        rows = await self.session.execute(
+            select(Run.id, Run.thread_id, Thread.user_id)
+            .join(Thread)
+            .where(
+                Run.status == "running",
+                or_(Run.lease_until.is_(None), Run.lease_until < func.now()),
+            )
+            .limit(100)
+        )
+        return [(r.id, r.thread_id, r.user_id) for r in rows]
+
+    async def command(self, run_id: UUID, request_key: str) -> RunCommand | None:
+        return await self.session.get(RunCommand, (run_id, request_key))

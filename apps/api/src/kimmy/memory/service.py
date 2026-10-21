@@ -4,6 +4,8 @@ from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kimmy.agent.context import AgentContext
+from kimmy.chat.ownership import require_owner
+from kimmy.chat.repository import ChatRepository
 from kimmy.errors import DomainError
 from kimmy.memory.models import MemoryRevision
 from kimmy.memory.repository import MemoryRepository
@@ -53,6 +55,12 @@ class MemoryService:
             repo = MemoryRepository(session)
             state = await repo.lock(user_id)
             if context is not None:
+                chat = ChatRepository(session)
+                await chat.thread(context.thread_id, user_id, lock=True)
+                require_owner(
+                    await chat.run(context.run_id, context.thread_id),
+                    context.owner_token,
+                )
                 require_generation(state.generation, context.memory_generation)
                 if context.user_id != user_id or not await repo.valid_source(
                     user_id,
@@ -107,6 +115,10 @@ class MemoryService:
             )
             await repo.add(entry)
             state.generation += 1
+            if context is not None:
+                run = await chat.run(context.run_id, context.thread_id)
+                assert run is not None
+                run.reset_history = True
             receipt = MemoryReceipt(
                 changed=True,
                 generation=state.generation,

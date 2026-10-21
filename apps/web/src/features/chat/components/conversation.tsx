@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, Copy, Loader2 } from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ApiError, displayError, errorMessage } from "@/lib/api-client";
@@ -11,15 +11,16 @@ import {
   type Citation,
   type Snapshot,
 } from "../api";
+import { useRunCommand } from "../hooks/use-run-command";
 import { useChatStream } from "../hooks/use-chat-stream";
 import {
   useMessageDraft,
   type PendingMessage,
 } from "../hooks/use-message-draft";
 import { MessageComposer } from "./message-composer";
-import { MessageContent } from "./message-content";
+import { AssistantAnswer } from "./assistant-answer";
 import { SourceDialog } from "./source-dialog";
-import { ToolActivity } from "./tool-activity";
+import { RunControls } from "./run-controls";
 
 export function Conversation({
   threadId,
@@ -32,6 +33,8 @@ export function Conversation({
   const query = useChatStream(threadId, onMemoryChange);
   const draft = useMessageDraft(threadId);
   const [citation, setCitation] = useState<Citation | null>(null);
+  const [revealing, setRevealing] = useState(false);
+  const [revealEpoch, setRevealEpoch] = useState(0);
   const [atBottom, setAtBottom] = useState(true);
   const viewport = useRef<HTMLDivElement>(null);
   const initialSubmission = useRef(false);
@@ -58,11 +61,7 @@ export function Conversation({
   }, []);
   const state = query.data;
   const active = state?.active_run;
-  const progress = state?.activities?.find((a) => a.run_id === active?.id);
-  const activeIndex =
-    state?.messages.findIndex((m) => m.id === active?.message_id) ?? -1;
-  const finalPresent =
-    activeIndex >= 0 && state?.messages[activeIndex + 1]?.role === "assistant";
+  const cancel = useRunCommand(threadId, active, "cancel");
   const scrollEnd = () => {
     viewport.current?.scrollTo({
       top: viewport.current.scrollHeight,
@@ -70,9 +69,15 @@ export function Conversation({
     });
   };
   useEffect(() => {
-    if (bottom.current && viewport.current)
-      viewport.current.scrollTop = viewport.current.scrollHeight;
-  }, [state?.messages.length, progress?.text, progress?.tools?.length]);
+    const element = viewport.current;
+    const content = element?.firstElementChild;
+    if (!element || !content) return;
+    const observer = new ResizeObserver(() => {
+      if (bottom.current) element.scrollTop = element.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     if (state?.latest_run?.status === "failed")
       toast.error(errorMessage(state.latest_run.error_code), {
@@ -162,76 +167,41 @@ export function Conversation({
               </p>
             )}
             {state?.messages.map((message, index) => {
-              const activity =
-                message.role === "assistant"
-                  ? state.activities?.find(
-                      (a) => a.message_id === state.messages[index - 1]?.id,
-                    )
-                  : undefined;
+              if (message.role !== "user") return null;
+              const next = state.messages[index + 1];
+              const answer = next?.role === "assistant" ? next : undefined;
+              const activity = state.activities?.find(
+                (a) => a.message_id === message.id,
+              );
+              const run = active?.message_id === message.id ? active : null;
               return (
-                <article
-                  key={message.id}
-                  data-message-id={message.id}
-                  aria-label={
-                    message.role === "user" ? "Pesan Anda" : "Jawaban Kimmy"
-                  }
-                  className={
-                    message.role === "user"
-                      ? "mb-7 ml-auto w-fit max-w-[88%] rounded-2xl bg-neutral-100 px-4 py-3 text-sm leading-7 whitespace-pre-wrap break-words"
-                      : "mb-10 min-w-0 text-sm leading-7"
-                  }
-                >
-                  {message.role === "user" ? (
-                    message.content
-                  ) : (
-                    <>
-                      <ToolActivity tools={activity?.tools ?? []} />
-                      <MessageContent
-                        content={message.content}
-                        citations={message.citations}
-                        onSource={setCitation}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="mt-3 text-muted-foreground"
-                        aria-label="Salin jawaban"
-                        onClick={() =>
-                          void navigator.clipboard
-                            .writeText(message.content)
-                            .then(() => toast.success("Jawaban disalin"))
-                            .catch(() =>
-                              toast.error("Jawaban belum dapat disalin."),
-                            )
-                        }
-                      >
-                        <Copy className="size-3.5" />
-                      </Button>
-                    </>
+                <Fragment key={message.id}>
+                  <article
+                    data-message-id={message.id}
+                    aria-label="Pesan Anda"
+                    className="mb-7 ml-auto w-fit max-w-[88%] rounded-2xl bg-neutral-100 px-4 py-3 text-sm leading-7 whitespace-pre-wrap break-words"
+                  >
+                    {message.content}
+                  </article>
+                  {(answer || run || activity?.tools?.length) && (
+                    <AssistantAnswer
+                      onRevealing={
+                        index >= state.messages.length - 2
+                          ? setRevealing
+                          : undefined
+                      }
+                      revealEpoch={revealEpoch}
+                      message={answer}
+                      activity={activity}
+                      run={run}
+                      onSource={setCitation}
+                    />
                   )}
-                </article>
+                </Fragment>
               );
             })}
-            {active && !finalPresent && (
-              <div
-                aria-label="Jawaban sedang diproses"
-                className="text-sm leading-7"
-              >
-                <ToolActivity tools={progress?.tools ?? []} />
-                {progress?.text ? (
-                  <MessageContent content={progress.text} />
-                ) : (
-                  <p
-                    role="status"
-                    className="flex items-center gap-2 text-muted-foreground"
-                  >
-                    <Loader2 className="size-3.5 animate-spin" />
-                    {active.status === "queued"
-                      ? "Menunggu giliran…"
-                      : "Kimmy sedang memproses…"}
-                  </p>
-                )}
-              </div>
+            {state?.latest_run && (
+              <RunControls threadId={threadId} run={state.latest_run} />
             )}
             {!active && state?.latest_run?.status === "failed" && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -263,6 +233,16 @@ export function Conversation({
       </div>
       <div className="mx-auto w-full max-w-3xl px-5 pb-5 pt-2 sm:px-4">
         <MessageComposer
+          onStop={
+            active
+              ? () => cancel.mutate()
+              : revealing
+                ? () => setRevealEpoch((value) => value + 1)
+                : undefined
+          }
+          stopping={cancel.isPending}
+          provider={draft.pending?.provider ?? draft.provider}
+          onProviderChange={draft.setProvider}
           value={draft.draft}
           onChange={draft.setDraft}
           busy={!state || (!!active && !draft.pending)}

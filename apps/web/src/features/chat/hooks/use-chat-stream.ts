@@ -92,7 +92,14 @@ export function useChatStream(threadId: string, onMemoryChange: () => void) {
               )
             )
               onMemoryChange();
-            if (["run.completed", "run.failed", "run.queued"].includes(kind))
+            if (
+              [
+                "run.completed",
+                "run.failed",
+                "run.cancelled",
+                "run.queued",
+              ].includes(kind)
+            )
               void client.invalidateQueries({ queryKey: chatKeys.threads });
           } catch {
             reconnect();

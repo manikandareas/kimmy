@@ -3,10 +3,12 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -71,6 +73,13 @@ class Run(ChatBase):
     status: Mapped[str] = mapped_column(String(20))
     error_code: Mapped[str | None] = mapped_column(String(80))
     memory_generation: Mapped[int | None] = mapped_column(BigInteger)
+    reset_history: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    owner_token: Mapped[UUID | None] = mapped_column()
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    provider: Mapped[str] = mapped_column(String(20), server_default="openai")
+    model: Mapped[str | None] = mapped_column(String(200))
+    resume_checkpoint_id: Mapped[str | None] = mapped_column(String(80))
     checkpoint_id: Mapped[str | None] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
@@ -80,7 +89,7 @@ class Run(ChatBase):
     __table_args__ = (
         UniqueConstraint("thread_id", "request_key", name="chat_runs_request_key"),
         CheckConstraint(
-            "status IN ('queued', 'running', 'completed', 'failed')",
+            "status IN ('queued', 'running', 'completed', 'failed', 'cancelled')",
             name="chat_runs_status_check",
         ),
         Index(
@@ -106,3 +115,11 @@ class Event(ChatBase):
         DateTime(timezone=True), server_default=text("now()")
     )
     __table_args__ = (CheckConstraint("seq > 0", name="chat_events_seq_check"),)
+
+
+class RunCommand(ChatBase):
+    __tablename__ = "chat_run_commands"
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("chat_runs.id"), primary_key=True)
+    request_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    expected_attempt: Mapped[int] = mapped_column(Integer)

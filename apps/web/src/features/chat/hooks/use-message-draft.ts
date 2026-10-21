@@ -1,7 +1,16 @@
 import { useState } from "react";
 import { toast } from "sonner";
-export type PendingMessage = { request_key: string; content: string };
-type Saved = { draft: string; pending: PendingMessage | null };
+import type { Provider } from "../components/model-select";
+export type PendingMessage = {
+  request_key: string;
+  content: string;
+  provider?: Provider;
+};
+type Saved = {
+  draft: string;
+  pending: PendingMessage | null;
+  provider?: Provider;
+};
 const storageKey = (id: string) => `kimmy:composer:${id}`;
 function read(id: string): Saved {
   try {
@@ -36,13 +45,18 @@ export function useMessageDraft(id: string) {
   };
   return {
     ...saved,
+    setProvider: (provider: Provider) => save({ ...saved, provider }),
     setDraft: (draft: string) => save({ ...saved, draft }),
     stage: (content: string) => {
-      const pending = { content, request_key: crypto.randomUUID() };
-      save({ draft: content, pending });
+      const pending = {
+        content,
+        request_key: crypto.randomUUID(),
+        provider: saved.provider,
+      };
+      save({ ...saved, draft: content, pending });
       return pending;
     },
-    acknowledge: () => save({ draft: "", pending: null }),
+    acknowledge: () => save({ ...saved, draft: "", pending: null }),
     reject: () => save({ ...saved, pending: null }),
   };
 }

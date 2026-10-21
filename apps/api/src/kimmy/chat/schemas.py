@@ -9,7 +9,7 @@ from kimmy.knowledge.schemas import Citation
 
 # Cursors are decimal strings on the wire, just like other PostgreSQL bigints.
 Cursor = Annotated[str, Field(pattern=r"^(0|[1-9][0-9]{0,18})$")]
-RunStatus = Literal["queued", "running", "completed", "failed"]
+RunStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 
 class CreateThread(BaseModel):
@@ -27,6 +27,7 @@ class CreateThread(BaseModel):
 class SendMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_key: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    provider: Literal["openai", "openrouter"] | None = None
     content: str = Field(min_length=1, max_length=20000)
 
     @field_validator("content")
@@ -65,6 +66,9 @@ class RunView(BaseModel):
     id: UUID
     thread_id: UUID
     message_id: UUID
+    provider: Literal["openai", "openrouter"]
+    model: str | None
+    attempts: int
     status: RunStatus
     error_code: str | None
     created_at: datetime
@@ -101,3 +105,21 @@ class EventPage(BaseModel):
     through_seq: Cursor
     next_after_seq: Cursor
     has_more: bool
+
+
+class RunCommandRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_key: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    expected_attempt: int = Field(ge=0, le=3)
+
+
+class ModelOption(BaseModel):
+    provider: Literal["openai", "openrouter"]
+    model: str
+    label: str
+    available: bool
+
+
+class ModelOptions(BaseModel):
+    default_provider: Literal["openai", "openrouter"]
+    models: list[ModelOption]

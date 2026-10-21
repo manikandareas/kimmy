@@ -107,6 +107,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/chat/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Models */
+        get: operations["models_api_chat_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat/threads/{thread_id}/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Run */
+        post: operations["cancel_run_api_chat_threads__thread_id__runs__run_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/chat/threads/{thread_id}/runs/{run_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Run */
+        post: operations["retry_run_api_chat_threads__thread_id__runs__run_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/memories": {
         parameters: {
             query?: never;
@@ -630,6 +681,30 @@ export interface components {
              */
             created_at: string;
         };
+        /** ModelOption */
+        ModelOption: {
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "openai" | "openrouter";
+            /** Model */
+            model: string;
+            /** Label */
+            label: string;
+            /** Available */
+            available: boolean;
+        };
+        /** ModelOptions */
+        ModelOptions: {
+            /**
+             * Default Provider
+             * @enum {string}
+             */
+            default_provider: "openai" | "openrouter";
+            /** Models */
+            models: components["schemas"]["ModelOption"][];
+        };
         /** Observation */
         Observation: {
             record_ref: components["schemas"]["RecordRef"];
@@ -702,6 +777,13 @@ export interface components {
             /** Tools */
             tools?: components["schemas"]["ToolActivity"][];
         };
+        /** RunCommandRequest */
+        RunCommandRequest: {
+            /** Request Key */
+            request_key: string;
+            /** Expected Attempt */
+            expected_attempt: number;
+        };
         /** RunView */
         RunView: {
             /**
@@ -720,10 +802,19 @@ export interface components {
              */
             message_id: string;
             /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "openai" | "openrouter";
+            /** Model */
+            model: string | null;
+            /** Attempts */
+            attempts: number;
+            /**
              * Status
              * @enum {string}
              */
-            status: "queued" | "running" | "completed" | "failed";
+            status: "queued" | "running" | "completed" | "failed" | "cancelled";
             /** Error Code */
             error_code: string | null;
             /**
@@ -747,6 +838,8 @@ export interface components {
         SendMessage: {
             /** Request Key */
             request_key: string;
+            /** Provider */
+            provider?: ("openai" | "openrouter") | null;
             /** Content */
             content: string;
         };
@@ -1462,6 +1555,188 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    models_api_chat_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelOptions"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_run_api_chat_threads__thread_id__runs__run_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunView"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    retry_run_api_chat_threads__thread_id__runs__run_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunView"];
                 };
             };
             /** @description Not Found */

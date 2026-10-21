@@ -1,4 +1,5 @@
 import { Check, ChevronDown, Loader2, Wrench, X } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -111,7 +112,7 @@ function ToolDetail({ tool }: { tool: Tool }) {
         </div>
       )}
       {"analysis" in data && data.analysis.coverage.length > 0 && (
-        <ul className="max-h-40 space-y-1 overflow-y-auto text-muted-foreground">
+        <ul className="space-y-1 text-muted-foreground">
           {data.analysis.coverage.map((o, i) => (
             <li key={i}>
               {o.record_ref.table} #{o.record_ref.id}: {o.reasons.join(", ")}
@@ -120,7 +121,7 @@ function ToolDetail({ tool }: { tool: Tool }) {
         </ul>
       )}
       {"operations" in data && data.operations.coverage.length > 0 && (
-        <ul className="max-h-40 space-y-1 overflow-y-auto text-muted-foreground">
+        <ul className="space-y-1 text-muted-foreground">
           {data.operations.coverage.map((o, i) => (
             <li key={i}>
               Sesi #{o.record_ref.id}: {o.reasons.join(", ")} · mesin{" "}
@@ -169,7 +170,7 @@ function ToolDetail({ tool }: { tool: Tool }) {
           {result.record_refs.length} referensi record
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <ul className="mt-2 max-h-48 overflow-auto font-mono text-xs text-muted-foreground">
+          <ul className="mt-2 font-mono text-xs text-muted-foreground">
             {result.record_refs.map((ref, i) => (
               <li key={i}>
                 {ref.table} · {ref.id}
@@ -215,7 +216,11 @@ export function ToolActivity({ tools }: { tools: Tool[] }) {
               <ChevronDown className="ml-auto size-3" />
             </CollapsibleTrigger>
             <CollapsibleContent className="pb-3 text-xs leading-relaxed">
-              <ToolDetail tool={tool} />
+              <ScrollArea className="max-h-72 [&_[data-slot=scroll-area-viewport]]:max-h-72">
+                <div className="pr-4">
+                  <ToolDetail tool={tool} />
+                </div>
+              </ScrollArea>
             </CollapsibleContent>
           </Collapsible>
         ))}

@@ -13,6 +13,7 @@ from langgraph.errors import GraphRecursionError
 from kimmy.agent.citations import resolve_citations
 from kimmy.agent.context import AgentContext
 from kimmy.agent.factory import AgentGraph, build_agent
+from kimmy.agent.fenced_checkpoints import FencedCheckpoints
 from kimmy.agent.tools import fleet_tools
 from kimmy.agent.tools.memory import memory_tools
 from kimmy.agent.tools.search_knowledge import build_tool as knowledge_tool
@@ -41,6 +42,7 @@ async def stream_answer(
     content: str,
     parent_checkpoint: str | None,
     settings: Settings,
+    saver: FencedCheckpoints,
 ) -> tuple[str, str, list[Citation]]:
     config: RunnableConfig = {
         "configurable": {
@@ -52,7 +54,7 @@ async def stream_answer(
     }
     if parent_checkpoint:
         previous = await agent.aget_state(config)
-        if not previous.values or previous.next:
+        if not previous.values or (previous.next and not context.resume):
             raise InvalidAgentResult("Successful checkpoint is missing or unfinished")
 
     received: dict[UUID, Citation] = {}
@@ -76,7 +78,9 @@ async def stream_answer(
             flushed_at = monotonic()
 
     async for part in agent.astream(
-        {
+        None
+        if context.resume
+        else {
             "messages": [
                 HumanMessage(content=content, id=str(context.source_message_id))
             ]
@@ -153,6 +157,34 @@ async def stream_answer(
                             message.tool_call_id,
                         )
     await flush()
+    # Read this execution's checkpoint, never the unfenced latest thread head.
+    latest = await agent.aget_state(
+        {
+            "configurable": {
+                "thread_id": str(context.thread_id),
+                "checkpoint_id": saver.latest_id
+                or parent_checkpoint
+                or EMPTY_CHECKPOINT,
+            }
+        }
+    )
+    messages = latest.values.get("messages", [])
+    start = next(
+        (i for i, m in enumerate(messages) if m.id == str(context.source_message_id)),
+        None,
+    )
+    if start is None:
+        raise InvalidAgentResult("Current input missing from checkpoint")
+    for message in messages[start + 1 :]:
+        if isinstance(message, AIMessage):
+            final = message
+        elif (
+            isinstance(message, ToolMessage)
+            and message.name == "search_knowledge"
+            and message.status == "success"
+        ):
+            artifact = SearchResult.model_validate(message.artifact)
+            received.update((c.chunk_id, c) for c in artifact.citations)
     if (
         final is None
         or final.tool_calls
@@ -162,9 +194,6 @@ async def stream_answer(
         raise InvalidAgentResult("Agent did not produce a final text answer")
     if final.response_metadata.get("finish_reason") in {"length", "content_filter"}:
         raise InvalidAgentResult("Provider did not finish the answer")
-    latest = await agent.aget_state(
-        {"configurable": {"thread_id": str(context.thread_id)}}
-    )
     checkpoint_id = latest.config.get("configurable", {}).get("checkpoint_id")
     if latest.next or not isinstance(checkpoint_id, str):
         raise InvalidAgentResult("Final checkpoint is not complete")
@@ -183,16 +212,32 @@ class AgentExecutor:
         self.service = service
         self.saver = saver
 
-    async def execute(self, thread_id: UUID, user_id: str, run_id: UUID) -> None:
+    async def execute(
+        self, thread_id: UUID, user_id: str, run_id: UUID, token: UUID
+    ) -> None:
         try:
             async with asyncio.timeout(self.settings.agent_timeout_seconds):
                 context, content, parent = await self.service.execution_input(
-                    thread_id, user_id, run_id
+                    thread_id, user_id, run_id, token
                 )
-                async with chat_model(self.settings) as model:
+                settings = self.settings.model_copy(
+                    update={
+                        "chat_provider": context.provider,
+                        "openai_chat_model"
+                        if context.provider == "openai"
+                        else "openrouter_chat_model": context.model
+                        or (
+                            self.settings.openai_chat_model
+                            if context.provider == "openai"
+                            else self.settings.openrouter_chat_model
+                        ),
+                    }
+                )
+                saver = FencedCheckpoints(self.saver, self.service, context)
+                async with chat_model(settings) as model:
                     agent = build_agent(
                         model,
-                        self.saver,
+                        saver,
                         self.settings,
                         fleet_tools(self.service.engine)
                         + memory_tools(MemoryService(self.service.engine))
@@ -204,7 +249,7 @@ class AgentExecutor:
                         MemoryService(self.service.engine),
                     )
                     answer, checkpoint_id, citations = await stream_answer(
-                        agent, self.service, context, content, parent, self.settings
+                        agent, self.service, context, content, parent, settings, saver
                     )
                 await self.service.complete(context, answer, checkpoint_id, citations)
             logger.info("Chat run completed run_id=%s", run_id)
@@ -224,8 +269,7 @@ class AgentExecutor:
         except InvalidAgentResult:
             code = "AGENT_INVALID_RESULT"
         except asyncio.CancelledError:
-            # Graceful process cancellation; SIGKILL/crash recovery is KM-012.
-            await self.service.fail(thread_id, user_id, run_id, "WORKER_INTERRUPTED")
+            # Leave the durable lease for the recovery loop after shutdown.
             raise
         except Exception as error:
             # Provider exceptions can include request text or credentials. Log only
@@ -234,5 +278,5 @@ class AgentExecutor:
                 "Agent failed run_id=%s error_type=%s", run_id, type(error).__name__
             )
             code = "AGENT_EXECUTION_FAILED"
-        await self.service.fail(thread_id, user_id, run_id, code)
+        await self.service.fail(thread_id, user_id, run_id, code, token)
         logger.info("Chat run failed run_id=%s code=%s", run_id, code)

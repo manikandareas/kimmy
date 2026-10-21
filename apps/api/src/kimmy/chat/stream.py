@@ -34,7 +34,7 @@ async def stream_events(
                 yield ": heartbeat\n\n"
                 heartbeat = monotonic()
             if not page.has_more:
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.2)
             page = await service.events(thread_id, user_id, int(page.next_after_seq))
     except asyncio.CancelledError:
         raise

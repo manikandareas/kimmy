@@ -58,7 +58,11 @@ def project_activity(runs: list[Run], events: list[Event]) -> list[RunActivity]:
     active_ids = {run.id for run in runs if run.status in {"queued", "running"}}
     for event in events:
         item = activities[event.run_id]
-        if event.kind == "agent.text_delta" and event.run_id in active_ids:
+        if event.kind == "run.queued":
+            item.text = ""
+            item.model_message_id = None
+            item.tools = []
+        elif event.kind == "agent.text_delta" and event.run_id in active_ids:
             model_id = event.payload.get("model_message_id")
             if model_id != item.model_message_id:
                 item.text = ""
