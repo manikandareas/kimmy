@@ -1,5 +1,7 @@
 # Kimmy - Fleet Operations Assistant
 
+Live demo: [kimmy.whoismanik.dev](https://kimmy.whoismanik.dev)
+
 Kimmy is an operations chatbot for logistics truck fleet managers. Users ask questions in everyday language, and Kimmy answers from the company's actual data: it reads fleet data through **tools**, computes metrics deterministically in the backend, remembers **user memory notes** across threads, and refers to **company SOPs** through RAG with openable source citations.
 
 The project focuses on three capabilities:
