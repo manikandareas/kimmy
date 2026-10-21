@@ -3,7 +3,8 @@
 Asisten operasional armada. Implementasi saat ini mencakup **fondasi repository dan boot lokal**,
 **skema, seed, dan metrik armada**, serta **chat persisten,
 admission run, dan queue worker**, serta **agent LangChain dengan provider
-OpenAI/OpenRouter dan checkpoint PostgreSQL**, serta **lima tool analisis armada**.
+OpenAI/OpenRouter dan checkpoint PostgreSQL**, **lima tool analisis armada**,
+**memory umum lintas thread**, serta **indexing dan pencarian tiga SOP**.
 
 ## Sumber spesifikasi
 
@@ -12,6 +13,8 @@ OpenAI/OpenRouter dan checkpoint PostgreSQL**, serta **lima tool analisis armada
 - [Chat persisten dan queue worker](https://app.notion.com/p/400abdd6187381cd88a1fae5d6c37d06)
 - [Agent, provider, dan checkpoint](https://app.notion.com/p/400abdd6187381bfa087e80fc84d6355)
 - [Tools analisis armada](https://app.notion.com/p/400abdd6187381b39f96d510b257ef60)
+- [Memory umum lintas thread](https://app.notion.com/p/400abdd6187381b5824fe0256442bbd9)
+- [Ingestion tiga SOP](https://app.notion.com/p/400abdd6187381b6b612c8891cb969e0)
 - [Architecture & Code](https://app.notion.com/p/400abdd61873812e9a69f25160d1a33d)
 - [Database Contract](https://app.notion.com/p/400abdd6187381e1968dd6232f7c0e14)
 
@@ -42,7 +45,7 @@ dan buka http://localhost:8080. Jalankan `make down` sebelum berganti mode.
 `compose.yaml` adalah dasar deployment, `compose.local.yaml` menambahkan port lokal.
 Service saat ini: postgres (pgvector), migrate (one-shot), api, worker, dan web
 (React/Nginx). API/worker Docker menunggu migrate berhasil; seed armada tetap
-eksplisit. SOP, ekstensi vector, dan deploy Dokploy mengikuti tiket berikutnya.
+eksplisit. Ekstensi vector dan tiga SOP tersedia melalui indexing eksplisit; deploy Dokploy mengikuti tiket berikutnya.
 
 ## Development dan quality gates
 
@@ -84,7 +87,7 @@ CRUD atau dashboard armada.
 
 Tidak ada dependency testing, eval, atau Playwright. Verifikasi menggunakan static
 checks, build, HTTP langsung, dan walkthrough browser. Chat persisten kini tersedia
-melalui API bersama agent/provider dan tools armada. UI chat, memory, RAG, dan
+melalui API bersama agent/provider dan tools armada. UI chat, integrasi tool RAG, panel memory, dan
 deployment produksi mengikuti tiket masing-masing.
 
 ## Verifikasi fondasi — 21 Oktober 2026
@@ -558,3 +561,120 @@ Baca snapshot/run/events dari endpoint thread yang sama. Lima tool harus berhasi
 aktivitas memiliki 3 trip, estimasi BBM 20 L/100 km, biaya pengisian Rp1.500.000,
 WO-007 satu record, dan downtime KM-007 48 jam. UI chat/citation reader, memory,
 RAG, recovery crash, dan deployment Dokploy tetap mengikuti tiket masing-masing.
+
+
+## Memory umum lintas thread — KM-006
+
+Memory menyimpan **satu field isi `content` per catatan**, tanpa kategori wajib
+atau whitelist preferensi. Metadata ID, revisi, sumber pesan, dan generation
+mendukung koreksi serta forget. Maksimal delapan catatan aktif per pengguna,
+masing-masing 1000 karakter. Ketika penuh, penambahan ditolak eksplisit; catatan
+lama tidak dibuang diam-diam. Tidak ada embedding/vector search untuk memory.
+
+- `GET /api/memories`: profil aktif dan generation.
+- `POST /api/memories`: `{ "content": "Saya menyiapkan pameran keramik." }`.
+- `PATCH /api/memories/{id}`: `content` dan `expected_revision`.
+- `POST /api/memories/{id}/forget`: `expected_revision`.
+
+Identitas berasal dari server. Tool `remember_memory` dan `forget_memory`
+mengikat sumber ke pesan pengguna pada run aktif, bukan argumen model.
+API panel merupakan aksi langsung pengguna dan menyimpan sumber chat null.
+Panel visual tetap KM-011. Content kosong, terlalu panjang, atau field identitas
+sisipan ditolak. Koreksi memakai ID/revisi; revisi stale menghasilkan 409.
+Nilai identik menjadi no-op. Mutasi per pengguna diserialisasikan dengan row lock;
+setiap perubahan menghasilkan revisi dan menaikkan generation.
+
+Profil aktif dimasukkan ke prompt sementara sebelum panggilan model, tidak
+menjadi pesan pengguna permanen. Instruksi saat ini mengalahkan memory tanpa
+mengubahnya kecuali pengguna meminta penyimpanan. Catatan adalah konteks,
+bukan bukti angka armada atau instruksi sistem. Thread baru dimulai dengan
+transcript kosong. Setelah perubahan memory, checkpoint generation lama tidak
+dipakai; jika tool mengubah memory dalam run, pesan sebelum giliran saat ini
+dihapus dari state model berikutnya. History chat untuk pengguna tetap utuh.
+Checkpoint giliran yang mengubah memory juga tidak dipakai pada giliran berikutnya,
+karena pesan koreksi/forget bisa mengutip isi lama. Konsekuensinya, konteks
+percakapan model dimulai kembali setelah invalidasi.
+
+Progress dan publikasi final memeriksa generation di dalam transaksi dengan lock
+yang sama seperti perubahan memory. Run stale gagal dengan `MEMORY_CHANGED` pada
+batas progress/publikasi berikutnya; pengguna dapat mengirim pesan baru. Panggilan
+provider yang sudah berjalan tidak dijanjikan langsung berhenti. Delta/history
+yang sudah dipublikasikan sebelum perubahan tidak dihapus. Recovery worker crash,
+cancel/retry umum, dan UI reconnect tetap KM-012/KM-010.
+
+## Indexing SOP — KM-007
+
+Tiga file `knowledge/*.md` adalah SOP simulasi, masing-masing memiliki metadata
+judul, versi, dan tanggal berlaku. Teks dipecah per heading `##`; versi awal
+menghasilkan 13 chunk. File dibatasi 60000 karakter, maksimal 30 bagian per SOP,
+dan 6000 karakter per bagian agar input embedding terikat.
+
+```sh
+make migrate
+make knowledge-index
+make knowledge-index # no-op; tidak menggandakan chunk aktif
+make knowledge-search ARGS='"Bagaimana menghitung downtime yang bertumpuk?"'
+```
+
+Indexing memakai adapter embedding OpenAI yang sudah tersedia, terpisah dari
+provider chat. Identitas `openai:<model>` dan dimensi disimpan bersama versi/hash.
+CLI memerlukan `OPENAI_API_KEY` untuk embedding baru dan pencarian.
+Perubahan isi memerlukan kenaikan `version` pada metadata dokumen; perubahan
+model/dimensi memerlukan `make knowledge-index ARGS='--rebuild'`. Rebuild
+mengaktifkan seluruh corpus pada konfigurasi terpilih; embedding identik yang
+sudah tersimpan dapat digunakan kembali. Versi lama disimpan untuk referensi,
+tetapi tidak dicari. Tidak ada import data armada.
+
+Satu advisory lock dan transaksi melindungi aktivasi corpus. Kegagalan embedding
+atau penyimpanan mempertahankan corpus aktif sebelumnya. Query memakai snapshot
+repeatable-read, versi aktif, cosine similarity pgvector, dan maksimal lima
+hasil (default tiga). Hasil merupakan kandidat retrieval; score bukan bukti
+kebenaran atau jaminan relevansi. Citation memuat ID chunk/dokumen, sumber,
+judul, bagian, versi, tanggal berlaku, kutipan utuh, dan score. Pembuatan jawaban
+agent/citation reader mengikuti KM-008/KM-009.
+
+Tabel `knowledge_*` dikelola migrasi SQL eksplisit karena kolom vector; tabel itu
+dikecualikan dari autogenerate ORM. Container API/worker menyertakan direktori
+knowledge. Di Docker: `docker compose run --rm api /app/.venv/bin/python -m
+kimmy.cli knowledge-index` (satu baris). Tidak ada dependency testing/eval/Playwright
+baru.
+
+
+### Walkthrough manual KM-006/KM-007 — 21 Oktober 2026
+
+Verifikasi menggunakan API HTTP dan worker terpisah di database PostgreSQL
+disposable, probe Python sementara tanpa dependency testing/eval/Playwright,
+serta provider chat dan embedding nyata. Database probe dihapus setelah selesai;
+data armada lokal tidak diubah.
+
+- OpenAI: permintaan eksplisit menyimpan nama proyek kebun **Lentera Biru**,
+  thread baru kosong lalu dapat recall, override satu giliran tidak mengubah
+  generation, koreksi ke **Taman Jingga** menghasilkan revisi 2 pada ID sama,
+  dan forget diikuti pertanyaan pada thread sama tidak menghidupkan nama lama.
+- OpenRouter: recall catatan umum pameran keramik **Awan Pagi** dari profil
+  yang diperbarui melalui API berhasil. API create/edit/forget, input kosong,
+  penyisipan user_id, dan konflik expected_revision diverifikasi langsung.
+- Empat penulisan identik concurrent menghasilkan satu perubahan. Dua koreksi
+  concurrent pada revisi sama menghasilkan satu sukses dan satu konflik.
+  Catatan kesembilan ditolak, pengguna lain tidak dapat mengedit ID yang bukan
+  miliknya, sumber chat palsu ditolak, dan runtime/user_id tidak ada dalam schema
+  argumen model. Database menggunakan UTC dan tidak ada dua revisi aktif per ID.
+- Perubahan profil saat run aktif menolak progress dan publikasi final stale
+  dengan MEMORY_CHANGED. Probe tambahan membuktikan checkpoint giliran mutasi
+  tidak digunakan lagi, checkpoint biasa dengan generation sama tetap dipakai,
+  dan history pengguna tetap tersimpan setelah forget yang mengutip isi lama.
+- Indexing pertama menghasilkan tiga dokumen/13 chunk; indexing kedua no-op
+  dengan jumlah sama. Parafrase maintenance, downtime overlap, dan pengisian
+  versus konsumsi masing-masing menemukan SOP terkait. Kutipan hasil cocok
+  dengan isi record chunk yang dirujuk.
+- Perubahan isi tanpa kenaikan versi ditolak. Versi baru mengganti versi aktif
+  tanpa menggandakan 13 chunk aktif. Perubahan 1536 → 256 dimensi ditolak tanpa
+  --rebuild; rebuild eksplisit berhasil. Pencarian dengan konfigurasi lama
+  ditolak. Rebuild dengan model invalid gagal dan corpus sebelumnya tetap bisa
+  dicari.
+- `make check` lulus (61 file Python, lint/format/typecheck frontend) dan
+  `make build` lulus (React serta image API/worker/migrate/web). Migrasi 0004/0005
+  diterapkan lokal; SOP lokal diindeks pada text-embedding-3-small/1536.
+
+UI panel memory, tool RAG pada agent, dan dialog sumber belum menjadi bagian
+kedua tiket ini. Tidak ada commit/push atau deployment Dokploy.
