@@ -20,6 +20,8 @@ def include_name(
         and name is not None
         and (
             name.startswith("procrastinate_")
+            # SOP vector tables are maintained by explicit SQL migrations.
+            or name.startswith("knowledge_")
             or name
             in {
                 "checkpoints",

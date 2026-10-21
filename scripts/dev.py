@@ -94,6 +94,21 @@ def main() -> int:
             web_env,
         ),
     }
+    for name in ("knowledge-index", "knowledge-search"):
+        commands[name] = (
+            [
+                "uv",
+                "run",
+                "--project",
+                "apps/api",
+                "python",
+                "-m",
+                "kimmy.cli",
+                name,
+                *sys.argv[2:],
+            ],
+            api_env,
+        )
     selected = [sys.argv[1]] if len(sys.argv) > 1 else ["api", "worker", "web"]
     children: list[subprocess.Popen[bytes]] = []
     stopping = False

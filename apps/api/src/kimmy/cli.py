@@ -12,9 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kimmy.agent.checkpoints import setup_checkpoints
 from kimmy.config import get_settings
 from kimmy.database import create_engine
+from kimmy.errors import DomainError
 from kimmy.fleet.repository import FleetRepository
 from kimmy.fleet.schemas import Period
 from kimmy.fleet.service import FleetService
+from kimmy.knowledge.schemas import IndexReceipt, SearchInput, SearchResult
+from kimmy.knowledge.service import KnowledgeService
 from kimmy.main import app
 from kimmy.schemas import FleetId
 from kimmy.seed import SEED_END, SEED_START, SeedNotEmptyError, seed_fleet
@@ -52,6 +55,23 @@ async def run_fleet(args: argparse.Namespace) -> None:
         await engine.dispose()
 
 
+async def run_knowledge(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    engine = create_engine(settings)
+    try:
+        service = KnowledgeService(engine, settings)
+        result: IndexReceipt | SearchResult
+        if args.command == "knowledge-index":
+            result = await service.index(Path(args.directory), rebuild=args.rebuild)
+        else:
+            result = await service.search(
+                SearchInput(query=args.query, limit=args.limit)
+            )
+        print(result.model_dump_json(indent=2))
+    finally:
+        await engine.dispose()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Offline OpenAPI export and fleet administration commands."
@@ -65,12 +85,23 @@ def main() -> None:
     report.add_argument("--start", default=SEED_START.isoformat())
     report.add_argument("--end", default=SEED_END.isoformat())
     report.add_argument("--depot", type=TypeAdapter(FleetId).validate_python)
+    indexing = commands.add_parser("knowledge-index")
+    indexing.add_argument("--directory", default="knowledge")
+    indexing.add_argument("--rebuild", action="store_true")
+    search = commands.add_parser("knowledge-search")
+    search.add_argument("query")
+    search.add_argument("--limit", type=int, default=3)
     args = parser.parse_args()
     if args.command == "migrate":
         command.upgrade(
             Config(str(Path(__file__).resolve().parents[2] / "alembic.ini")), "head"
         )
         asyncio.run(setup_checkpoints(get_settings()))
+    elif args.command in {"knowledge-index", "knowledge-search"}:
+        try:
+            asyncio.run(run_knowledge(args))
+        except (ValueError, DomainError) as error:
+            parser.exit(1, f"{error}\n")
     elif args.command in {None, "openapi"}:
         export_openapi()
     else:

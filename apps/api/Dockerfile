@@ -5,6 +5,7 @@ COPY apps/api/pyproject.toml apps/api/uv.lock ./
 COPY apps/api/src ./src
 COPY apps/api/alembic.ini ./alembic.ini
 COPY apps/api/migrations ./migrations
+COPY knowledge ./knowledge
 RUN uv sync --frozen --no-dev
 RUN useradd --create-home app
 USER app

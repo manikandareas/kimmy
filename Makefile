@@ -1,5 +1,5 @@
 COMPOSE = docker compose -f compose.yaml -f compose.local.yaml
-.PHONY: install dev down logs check format build api-types dev-api dev-web dev-worker infra-up docker-dev migrate seed fleet-report
+.PHONY: install dev down logs check format build api-types dev-api dev-web dev-worker infra-up docker-dev migrate seed fleet-report knowledge-index knowledge-search
 install:
 	uv sync --project apps/api
 	pnpm --dir apps/web install --frozen-lockfile
@@ -43,3 +43,8 @@ seed:
 	uv run --project apps/api python scripts/dev.py seed
 fleet-report:
 	uv run --project apps/api python scripts/dev.py fleet-report $(ARGS)
+
+knowledge-index:
+	uv run --project apps/api python scripts/dev.py knowledge-index $(ARGS)
+knowledge-search:
+	uv run --project apps/api python scripts/dev.py knowledge-search $(ARGS)
