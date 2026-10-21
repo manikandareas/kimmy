@@ -67,6 +67,7 @@ class Run(ChatBase):
     request_key: Mapped[str] = mapped_column(String(128))
     status: Mapped[str] = mapped_column(String(20))
     error_code: Mapped[str | None] = mapped_column(String(80))
+    checkpoint_id: Mapped[str | None] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

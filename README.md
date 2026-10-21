@@ -2,13 +2,15 @@
 
 Asisten operasional armada. Implementasi saat ini mencakup **fondasi repository dan boot lokal**,
 **skema, seed, dan metrik armada**, serta **chat persisten,
-admission run, dan queue worker**.
+admission run, dan queue worker**, serta **agent LangChain dengan provider
+OpenAI/OpenRouter dan checkpoint PostgreSQL**.
 
 ## Sumber spesifikasi
 
 - [Fondasi repository dan boot lokal](https://app.notion.com/p/400abdd6187381f48001e675da62dd70)
 - [Data operasional armada dan metrik](https://app.notion.com/p/400abdd6187381a29c7adf973887d56e)
 - [Chat persisten dan queue worker](https://app.notion.com/p/400abdd6187381cd88a1fae5d6c37d06)
+- [Agent, provider, dan checkpoint](https://app.notion.com/p/400abdd6187381bfa087e80fc84d6355)
 - [Architecture & Code](https://app.notion.com/p/400abdd61873812e9a69f25160d1a33d)
 - [Database Contract](https://app.notion.com/p/400abdd6187381e1968dd6232f7c0e14)
 
@@ -80,7 +82,7 @@ melalui service dan CLI. Endpoint/tool armada mengikuti tiket berikutnya.
 
 Tidak ada dependency testing, eval, atau Playwright. Verifikasi menggunakan static
 checks, build, HTTP langsung, dan walkthrough browser. Chat persisten kini tersedia
-melalui API. Agent/provider, UI chat, memory, RAG, dan deployment produksi mengikuti
+melalui API bersama agent/provider. UI chat, tools armada, memory, RAG, dan deployment produksi mengikuti
 tiket masing-masing.
 
 ## Verifikasi fondasi — 21 Oktober 2026
@@ -120,7 +122,7 @@ make fleet-report ARGS='--unit KM-002 --start 2026-08-22T00:00:00Z --end 2026-10
 ```
 
 Migrasi menggunakan `apps/api/alembic.ini` dan tersedia dalam image API. Untuk
-runtime Docker, gunakan `docker compose run --rm api /app/.venv/bin/alembic upgrade head`
+runtime Docker, gunakan `docker compose run --rm migrate`
 dan `docker compose run --rm api /app/.venv/bin/python -m kimmy.cli seed`.
 Migrasi/seed tidak dijalankan otomatis saat API boot. Jangan menghapus volume untuk
 mengulang seed: penolakan pada database terisi adalah perilaku yang diharapkan.
@@ -252,15 +254,13 @@ melampaui ledger ditolak dengan `409 CURSOR_AHEAD`; cursor invalid menghasilkan
 pendek tanpa memegang koneksi selama menunggu. Subscription tidak membuat run,
 job, atau panggilan provider. Nginx menonaktifkan buffering SSE.
 
-Worker Procrastinate mengklaim queued run satu kali lalu menyimpan event running
-serta hasil terminal. **Executor LangChain belum tersedia**; worker
-saat ini mengakhiri run dengan `failed / AGENT_NOT_CONFIGURED`, tanpa pesan
-asisten palsu. Job delivery Procrastinate dapat berstatus succeeded sementara
-run aplikasi failed: delivery berhasil, tetapi executor belum tersedia. Pending
-job tetap tersimpan ketika worker belum berjalan. Recovery run yang sudah
-running saat worker mati, lease/ownership lanjutan, cancel/retry, serta publikasi
-hasil agent belum diimplementasikan. Jangan menganggap restart worker sebagai bukti
-recovery agent pada tahap ini.
+Worker Procrastinate mengklaim queued run satu kali lalu menjalankan agent LangChain.
+Jawaban final, pointer checkpoint, event pesan, dan status completed di-commit dalam
+satu transaksi. Job delivery Procrastinate dapat berstatus succeeded sementara run
+aplikasi failed: pekerjaan telah ditangani dan kegagalannya disimpan. Pending job
+tetap tersimpan ketika worker belum berjalan. Recovery setelah worker crash saat
+running, lease/ownership lanjutan, dan cancel/retry tetap pada KM-012. Restart worker
+di antara dua run membuktikan persistensi konteks, bukan recovery run yang terputus.
 
 Procrastinate dipin ke 3.10.0. Migrasi 0002 menyertakan snapshot SQL upstream dan
 lisensi MIT agar upgrade dependency tidak mengubah migrasi historis. Migrasi
@@ -282,8 +282,7 @@ KIMMY_OPENROUTER_CHAT_MODEL=deepseek/deepseek-v4.1-flash-1017
 
 Nama Luna pada [katalog resmi OpenAI](https://developers.openai.com/api/docs/models)
 adalah `gpt-6-luna`, bukan `gpt-6.1-luna`. Model OpenRouter mengikuti permintaan
-pengguna. Konfigurasi ini belum membuktikan akses key, panggilan provider,
-streaming token, ataupun checkpoint LangChain; belum ada panggilan model.
+pengguna. Kedua provider telah diverifikasi pada walkthrough KM-004 di bawah.
 
 ### Walkthrough manual dan hasil — 21 Oktober 2026
 
@@ -324,5 +323,111 @@ Contoh walkthrough lewat Swagger di `http://localhost:9000/docs`: buat thread,
 kirim `{ "request_key": "demo-1", "content": "Periksa armada" }`, kirim ulang,
 lalu buka snapshot. Untuk melihat queued sebelum worker tersedia, jalankan hanya
 `make dev-api`; mulai `make dev-worker` setelah pesan diterima. Saat worker sudah
-berjalan, status failed yang eksplisit adalah hasil yang diharapkan sampai
-executor agent tersedia.
+berjalan dan provider terkonfigurasi, status completed beserta pesan asisten
+adalah hasil yang diharapkan. Pertanyaan armada akan menjelaskan keterbatasan
+karena tools analisis baru diimplementasikan pada KM-005.
+
+## Agent dan checkpoint — KM-004
+
+Worker memakai `create_agent` dengan adapter native `ChatOpenAI` atau
+`ChatOpenRouter`. Model chat dipilih lewat konfigurasi di atas. `llm.py` juga
+menyediakan factory embedding OpenAI terpisah; chat tidak membuat embedding atau
+membutuhkan key OpenAI ketika provider chat adalah OpenRouter. Factory embedding
+belum melakukan ingestion SOP; itu scope KM-007.
+
+| Environment | Default | Fungsi |
+| --- | --- | --- |
+| `KIMMY_OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Model embedding tersendiri |
+| `KIMMY_EMBEDDING_DIMENSIONS` | `1536` | Dimensi embedding |
+| `KIMMY_MODEL_TIMEOUT_SECONDS` | `60` | Timeout request provider |
+| `KIMMY_AGENT_TIMEOUT_SECONDS` | `180` | Deadline keseluruhan run |
+| `KIMMY_AGENT_MAX_TOOL_CALLS` | `8` | Batas eksekusi tool per run |
+| `KIMMY_AGENT_MAX_MODEL_CALLS` | `10` | Batas panggilan model per run |
+| `KIMMY_AGENT_MAX_OUTPUT_TOKENS` | `4096` | Batas output per panggilan model |
+
+HTTP client ditutup setelah run. Retry otomatis provider dinonaktifkan; retry
+command/recovery berikutnya ditangani KM-012. Timeout SDK OpenRouter dikonversi
+ke milidetik. Runtime context berisi user, thread, run, dan source message dari
+record server yang sudah divalidasi; model tidak memasok identitas tersebut.
+
+`make migrate` menjalankan Alembic hingga 0003, lalu `AsyncPostgresSaver.setup()`.
+Compose memakai command yang sama melalui service migrate. Empat tabel native
+LangGraph (`checkpoints`, `checkpoint_blobs`, `checkpoint_writes`,
+`checkpoint_migrations`) berada dalam database yang sama, dengan sesi UTC dan
+lifecycle pool eksplisit. Setup diserialkan melalui advisory lock dan aman diulang.
+Lockfile mengikat versi library yang membawa migrasi native; upgrade library
+checkpointer harus disertai pemeriksaan migrasi. Alembic tidak mengelola tabel
+framework sebagai model domain.
+
+Key checkpoint thread berasal dari UUID thread aplikasi. PK bigint tujuh tabel
+armada tetap terpisah dan tidak berubah. Migrasi 0003 hanya menambah
+`chat_runs.checkpoint_id` untuk menunjuk checkpoint dari run yang berhasil
+dipublikasikan. Pesan baru hanya mengirim input baru dengan ID pesan yang stabil;
+history tidak ditambahkan ulang ke checkpoint.
+
+Follow-up bercabang dari checkpoint run completed terakhir. Checkpoint sementara
+dari run failed tidak menjadi konteks run berikutnya, termasuk bila kegagalan
+terjadi setelah model selesai tetapi sebelum publikasi final. Pesan pengguna yang
+gagal tetap terlihat dalam history, tetapi percobaan gagal tidak dimasukkan ke
+konteks agent berikutnya. Thread tanpa run berhasil dimulai dari konteks kosong.
+Belum ada profil lintas thread atau tool operasional yang didaftarkan.
+
+Event tambahan pada ledger:
+
+| Kind | Payload | Makna |
+| --- | --- | --- |
+| `agent.text_delta` | `model_message_id`, `text` | Teks sementara per pesan model, dibatch; bukan pesan transcript final |
+| `tool.requested` | `tool_call_id`, `name` | Model meminta tool; belum menjamin eksekusinya diizinkan limit |
+| `tool.completed` | `tool_call_id`, `name`, `status` | Hasil eksekusi tool tersedia |
+| `message.created` | `message` | Pesan final canonical, dengan UUID aplikasi |
+| `run.completed` | `run` | Jawaban dan pointer checkpoint sudah tersimpan |
+
+Reasoning dan argumen tool tidak dipublikasikan pada text delta. SSE hanya
+membaca event tersimpan. UI nantinya harus mengganti preview dengan pesan final,
+bukan menggabungkannya menjadi pesan kedua; pada failed preview bukan jawaban final.
+Snapshot menjamin transcript final/status, sementara progress detail tersedia
+melalui ledger. Jangan memperlakukan `model_message_id` sebagai UUID pesan aplikasi.
+
+Error publik: `AGENT_NOT_CONFIGURED` (key tidak tersedia), `AGENT_TIMEOUT`
+(deadline run), `AGENT_LIMIT_EXCEEDED`, `AGENT_INVALID_RESULT` (jawaban/checkpoint
+akhir tidak lengkap), `AGENT_EXECUTION_FAILED` (provider/eksekusi gagal), serta
+`WORKER_INTERRUPTED` untuk cancellation proses yang dapat ditangani. Error mentah
+provider tidak dikirim ke klien atau dicatat di log aplikasi. Crash/SIGKILL dan
+database tidak tersedia saat penyimpanan kegagalan memerlukan recovery KM-012.
+
+### Walkthrough manual dan hasil — 21 Oktober 2026
+
+Verifikasi memakai database PostgreSQL sementara, API/worker sebagai proses
+terpisah, HTTP/SSE langsung, panggilan provider nyata, dan probe Python sementara.
+Tidak ada dependency testing/eval/Playwright yang ditambahkan.
+
+1. OpenAI `gpt-6-luna` dan OpenRouter `deepseek/deepseek-v4.1-flash-1017`
+   menjawab lewat antrean sampai completed. Ledger berisi text delta, pesan final,
+   dan run completed dengan sequence berurutan.
+2. Kedua provider mengingat kode `MERPATI-4829` pada follow-up setelah worker
+   direstart. Thread baru mulai dengan transcript kosong dan menyatakan tidak
+   mengetahui kode dari thread lain. Dua run menghasilkan empat pesan, tanpa duplikat.
+3. Tool probe sementara dipanggil oleh kedua model native dan menerima identitas
+   dari `ToolRuntime[AgentContext]`. Tool probe tidak didaftarkan dalam aplikasi.
+   Factory embedding terpisah menghasilkan vektor 1536 dimensi dari OpenAI.
+4. Model tidak valid menghasilkan failed; deadline satu detik menghasilkan
+   `AGENT_TIMEOUT`. Tidak ada pesan asisten palsu dan thread kembali menerima
+   pesan baru. Follow-up setelah keduanya tetap membaca checkpoint berhasil.
+5. Subscription SSE ditutup saat run berlangsung; run tetap completed. Restart
+   API menghasilkan snapshot identik, replay SSE melanjutkan setelah cursor, dan
+   request key yang sama mengembalikan run lama tanpa event/jawaban tambahan.
+6. Header/query user palsu tidak mengganti identitas server; payload `user_id`
+   ditolak. Probe loop terkontrol membuktikan batas model/tool menghentikan run
+   dengan `AGENT_LIMIT_EXCEEDED`, tanpa jawaban final atau tool berlebih.
+7. Trigger PostgreSQL sementara menolak event completed: transaksi membatalkan
+   pesan asisten dan pointer checkpoint, lalu run menjadi failed. Run pertama
+   berikutnya memakai konteks kosong meskipun checkpoint gagal masih tersimpan.
+8. Migrasi database kosong dan pengulangannya berhasil; Alembic metadata comparison
+   tidak menemukan drift dan sesi checkpoint/database memakai UTC.
+9. `make check`, `make build`, dan migrasi melalui image Docker lulus. Export
+   OpenAPI tetap menghasilkan tipe frontend yang sama. Development lokal di-restart;
+   API 9000 dan proxy Vite 5173 siap. Satu thread bukti lokal mencapai completed
+   dan menyatakan tools armada belum tersedia. Database probe sudah dihapus.
+
+Belum ada commit, push, atau deployment Dokploy. UI chat, tools analisis,
+memory/RAG, dan recovery worker crash tetap mengikuti tiket masing-masing.

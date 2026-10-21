@@ -7,6 +7,13 @@ x-backend-environment: &backend-environment
   KIMMY_CHAT_PROVIDER: ${KIMMY_CHAT_PROVIDER:-openai}
   KIMMY_OPENAI_CHAT_MODEL: ${KIMMY_OPENAI_CHAT_MODEL:-gpt-6-luna}
   KIMMY_OPENROUTER_CHAT_MODEL: ${KIMMY_OPENROUTER_CHAT_MODEL:-deepseek/deepseek-v4.1-flash-1017}
+  KIMMY_OPENAI_EMBEDDING_MODEL: ${KIMMY_OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+  KIMMY_EMBEDDING_DIMENSIONS: ${KIMMY_EMBEDDING_DIMENSIONS:-1536}
+  KIMMY_MODEL_TIMEOUT_SECONDS: ${KIMMY_MODEL_TIMEOUT_SECONDS:-60}
+  KIMMY_AGENT_TIMEOUT_SECONDS: ${KIMMY_AGENT_TIMEOUT_SECONDS:-180}
+  KIMMY_AGENT_MAX_TOOL_CALLS: ${KIMMY_AGENT_MAX_TOOL_CALLS:-8}
+  KIMMY_AGENT_MAX_MODEL_CALLS: ${KIMMY_AGENT_MAX_MODEL_CALLS:-10}
+  KIMMY_AGENT_MAX_OUTPUT_TOKENS: ${KIMMY_AGENT_MAX_OUTPUT_TOKENS:-4096}
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -43,7 +50,7 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    command: ["/app/.venv/bin/alembic", "upgrade", "head"]
+    command: ["/app/.venv/bin/python", "-m", "kimmy.cli", "migrate"]
     environment:
       KIMMY_DATABASE_URL: postgresql+psycopg://kimmy:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/kimmy
     depends_on:

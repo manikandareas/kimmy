@@ -69,6 +69,32 @@ class ChatRepository:
             select(Run).where(Run.id == run_id, Run.thread_id == thread_id)
         )
 
+    async def input_message(self, run: Run) -> Message:
+        message = await self.session.get(Message, run.message_id)
+        if message is None or message.thread_id != run.thread_id:
+            raise RuntimeError("Run input message is missing")
+        return message
+
+    async def completed_checkpoint(self, thread_id: UUID) -> str | None:
+        return await self.session.scalar(
+            select(Run.checkpoint_id)
+            .join(Message, Run.message_id == Message.id)
+            .where(Run.thread_id == thread_id, Run.status == "completed")
+            .order_by(Message.seq.desc())
+            .limit(1)
+        )
+
+    async def create_answer(self, thread: Thread, content: str) -> Message:
+        message = Message(
+            thread_id=thread.id,
+            seq=thread.last_seq + 1,
+            role="assistant",
+            content=content,
+        )
+        self.session.add(message)
+        await self.session.flush()
+        return message
+
     async def messages(
         self, thread_id: UUID, before_seq: int, limit: int
     ) -> list[Message]:

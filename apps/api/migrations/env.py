@@ -13,9 +13,20 @@ from kimmy.fleet.models import Base
 def include_name(
     name: str | None, type_: NameFilterType, parent_names: NameFilterParentNames
 ) -> bool:
-    # Procrastinate owns its schema and migration lifecycle.
+    # Framework tables have native keys and their own migration lifecycle.
     return not (
-        type_ == "table" and name is not None and name.startswith("procrastinate_")
+        type_ == "table"
+        and name is not None
+        and (
+            name.startswith("procrastinate_")
+            or name
+            in {
+                "checkpoints",
+                "checkpoint_blobs",
+                "checkpoint_writes",
+                "checkpoint_migrations",
+            }
+        )
     )
 
 

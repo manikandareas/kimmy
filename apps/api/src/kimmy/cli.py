@@ -1,11 +1,15 @@
 import argparse
 import asyncio
 import json
+from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 from pydantic import TypeAdapter
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kimmy.agent.checkpoints import setup_checkpoints
 from kimmy.config import get_settings
 from kimmy.database import create_engine
 from kimmy.fleet.repository import FleetRepository
@@ -55,13 +59,19 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("openapi")
     commands.add_parser("seed")
+    commands.add_parser("migrate")
     report = commands.add_parser("fleet-report")
     report.add_argument("--unit", default="KM-001")
     report.add_argument("--start", default=SEED_START.isoformat())
     report.add_argument("--end", default=SEED_END.isoformat())
     report.add_argument("--depot", type=TypeAdapter(FleetId).validate_python)
     args = parser.parse_args()
-    if args.command in {None, "openapi"}:
+    if args.command == "migrate":
+        command.upgrade(
+            Config(str(Path(__file__).resolve().parents[2] / "alembic.ini")), "head"
+        )
+        asyncio.run(setup_checkpoints(get_settings()))
+    elif args.command in {None, "openapi"}:
         export_openapi()
     else:
         try:

@@ -7,6 +7,7 @@ import procrastinate
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from kimmy.agent.context import AgentContext
 from kimmy.chat.models import Message, Thread
 from kimmy.chat.repository import ChatRepository
 from kimmy.chat.schemas import (
@@ -220,5 +221,59 @@ class ChatService:
                 thread,
                 run,
                 "run.failed",
+                {"run": RunView.model_validate(run).model_dump(mode="json")},
+            )
+
+    async def execution_input(
+        self, thread_id: UUID, user_id: str, run_id: UUID
+    ) -> tuple[AgentContext, str, str | None]:
+        async with self.repository(read_only=True) as repo:
+            thread = await self.require_thread(repo, thread_id, user_id)
+            run = await repo.run(run_id, thread_id)
+            if run is None or run.status != "running":
+                raise DomainError(409, "RUN_NOT_RUNNING", "Run is not running")
+            message = await repo.input_message(run)
+            return (
+                AgentContext(thread.user_id, thread.id, run.id, message.id),
+                message.content,
+                await repo.completed_checkpoint(thread_id),
+            )
+
+    async def progress(
+        self, context: AgentContext, kind: str, payload: dict[str, object]
+    ) -> None:
+        async with self.repository() as repo:
+            thread = await self.require_thread(
+                repo, context.thread_id, context.user_id, lock=True
+            )
+            run = await repo.run(context.run_id, context.thread_id)
+            if run is None or run.status != "running":
+                raise DomainError(409, "RUN_NOT_RUNNING", "Run is not running")
+            await repo.append_event(thread, run, kind, payload)
+
+    async def complete(
+        self, context: AgentContext, content: str, checkpoint_id: str
+    ) -> None:
+        async with self.repository() as repo:
+            thread = await self.require_thread(
+                repo, context.thread_id, context.user_id, lock=True
+            )
+            run = await repo.run(context.run_id, context.thread_id)
+            if run is None or run.status != "running":
+                raise DomainError(409, "RUN_NOT_RUNNING", "Run is not running")
+            answer = await repo.create_answer(thread, content)
+            await repo.append_event(
+                thread,
+                run,
+                "message.created",
+                {"message": message_view(answer).model_dump(mode="json")},
+            )
+            run.checkpoint_id = checkpoint_id
+            run.status = "completed"
+            run.finished_at = datetime.now(UTC)
+            await repo.append_event(
+                thread,
+                run,
+                "run.completed",
                 {"run": RunView.model_validate(run).model_dump(mode="json")},
             )

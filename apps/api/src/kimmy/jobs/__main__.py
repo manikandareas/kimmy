@@ -1,6 +1,8 @@
 import asyncio
 import logging
 
+from kimmy.agent.checkpoints import checkpoints
+from kimmy.chat.execution import AgentExecutor
 from kimmy.chat.service import ChatService
 from kimmy.config import get_settings
 from kimmy.database import create_engine
@@ -12,10 +14,12 @@ async def main() -> None:
     settings = get_settings()
     engine = create_engine(settings)
     queue = create_queue(settings)
-    register_tasks(queue, ChatService(engine, queue))
+    service = ChatService(engine, queue)
     try:
-        async with queue.open_async():
-            await queue.run_worker_async(queues=[CHAT_QUEUE], concurrency=4)
+        async with checkpoints(settings) as saver:
+            register_tasks(queue, service, AgentExecutor(settings, service, saver))
+            async with queue.open_async():
+                await queue.run_worker_async(queues=[CHAT_QUEUE], concurrency=4)
     finally:
         await engine.dispose()
 
