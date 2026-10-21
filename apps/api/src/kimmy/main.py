@@ -7,10 +7,12 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
+from kimmy.chat.router import router as chat_router
 from kimmy.config import get_settings
 from kimmy.database import create_engine
 from kimmy.dependencies import DemoIdentity, get_demo_identity
 from kimmy.errors import ErrorResponse, register_error_handlers
+from kimmy.jobs.queue import create_queue
 
 
 class HealthResponse(BaseModel):
@@ -21,6 +23,7 @@ class HealthResponse(BaseModel):
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engine = create_engine(get_settings())
     app.state.engine = engine
+    app.state.queue = create_queue(get_settings())
     try:
         yield
     finally:
@@ -34,6 +37,7 @@ app = FastAPI(
     responses={422: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
 )
 register_error_handlers(app)
+app.include_router(chat_router)
 
 
 @app.get("/api/health/live")

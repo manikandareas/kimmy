@@ -1,12 +1,14 @@
 # Kimmy
 
-Asisten operasional armada. Implementasi saat ini mencakup **KM-001: fondasi repository dan boot lokal** serta
-**KM-002: skema, seed, dan metrik armada**.
+Asisten operasional armada. Implementasi saat ini mencakup **fondasi repository dan boot lokal**,
+**skema, seed, dan metrik armada**, serta **chat persisten,
+admission run, dan queue worker**.
 
 ## Sumber spesifikasi
 
-- [KM-001](https://app.notion.com/p/400abdd6187381f48001e675da62dd70)
-- [KM-002](https://app.notion.com/p/400abdd6187381a29c7adf973887d56e)
+- [Fondasi repository dan boot lokal](https://app.notion.com/p/400abdd6187381f48001e675da62dd70)
+- [Data operasional armada dan metrik](https://app.notion.com/p/400abdd6187381a29c7adf973887d56e)
+- [Chat persisten dan queue worker](https://app.notion.com/p/400abdd6187381cd88a1fae5d6c37d06)
 - [Architecture & Code](https://app.notion.com/p/400abdd61873812e9a69f25160d1a33d)
 - [Database Contract](https://app.notion.com/p/400abdd6187381e1968dd6232f7c0e14)
 
@@ -22,8 +24,9 @@ make dev
 ```
 
 Buka http://localhost:5173. API readiness: http://localhost:5173/api/health/ready.
-`make dev` menjalankan hanya PostgreSQL di Docker, lalu API (Uvicorn reload) dan
-web (Vite HMR) sebagai proses CLI lokal. Ctrl+C menghentikan kedua proses lokal;
+`make dev` menjalankan hanya PostgreSQL di Docker, menerapkan migrasi, lalu API
+(Uvicorn reload), worker, dan web (Vite HMR) sebagai proses CLI lokal.
+Ctrl+C menghentikan ketiga proses lokal;
 PostgreSQL tetap tersedia sampai `make down`. Jika salah satu proses keluar,
 proses lainnya ikut dihentikan.
 Swagger API langsung: http://localhost:9000/docs.
@@ -34,9 +37,9 @@ Untuk preview seluruh stack Docker secara eksplisit, gunakan `make docker-dev`
 dan buka http://localhost:8080. Jalankan `make down` sebelum berganti mode.
 
 `compose.yaml` adalah dasar deployment, `compose.local.yaml` menambahkan port lokal.
-Service saat ini: postgres (pgvector), api, web (React/Nginx). Migrasi dan seed
-armada tersedia melalui perintah eksplisit di bawah. Worker, SOP, ekstensi vector,
-dan deploy Dokploy diimplementasikan pada tiket berikutnya.
+Service saat ini: postgres (pgvector), migrate (one-shot), api, worker, dan web
+(React/Nginx). API/worker Docker menunggu migrate berhasil; seed armada tetap
+eksplisit. SOP, ekstensi vector, dan deploy Dokploy mengikuti tiket berikutnya.
 
 ## Development dan quality gates
 
@@ -47,10 +50,13 @@ make build     # Build React dan kedua image Docker
 ```
 
 `make format` memperbaiki format. Untuk terminal terpisah, jalankan
-`make infra-up`, lalu `make dev-api` dan `make dev-web` di terminal masing-masing.
+`make infra-up`, `make migrate`, lalu `make dev-api`, `make dev-worker`, dan
+`make dev-web` di terminal masing-masing. Restart worker setelah mengubah kode
+worker; hanya API/web yang memakai reload otomatis.
 Launcher API membaca .env dan menyusun koneksi lokal dari POSTGRES_PASSWORD;
-KIMMY_DATABASE_URL dapat diberikan sebagai override. Environment KIMMY_* dari .env
-hanya diteruskan ke API, bukan proses Vite.
+KIMMY_DATABASE_URL dapat diberikan sebagai override. Environment KIMMY_*,
+OPENAI_API_KEY, dan OPENROUTER_API_KEY dari .env diteruskan ke backend/worker,
+bukan proses Vite.
 Environment divalidasi ketika aplikasi boot. Secret tidak diteruskan ke build frontend.
 
 ## Batas arsitektur
@@ -68,15 +74,16 @@ menyimpan status server; tipe HTTP berasal dari OpenAPI.
 
 `FleetId` adalah tipe string desimal positif sampai batas bigint PostgreSQL.
 Tidak ada konversi menjadi JavaScript number. Export OpenAPI menyertakan komponen
-kontrak ini untuk domain armada berikutnya; belum ada endpoint armada pada KM-001.
+kontrak ini untuk domain armada; endpoint armada belum tersedia.
 Tujuh tabel armada, seed 12 kendaraan/dua depot/60 hari, serta metrik tersedia
-melalui service dan CLI KM-002. Endpoint/tool armada mengikuti tiket berikutnya.
+melalui service dan CLI. Endpoint/tool armada mengikuti tiket berikutnya.
 
 Tidak ada dependency testing, eval, atau Playwright. Verifikasi menggunakan static
-checks, build, HTTP langsung, dan walkthrough browser. Belum ada panggilan provider,
-chat, memory, RAG atau bukti deployment produksi pada tahap fondasi ini.
+checks, build, HTTP langsung, dan walkthrough browser. Chat persisten kini tersedia
+melalui API. Agent/provider, UI chat, memory, RAG, dan deployment produksi mengikuti
+tiket masing-masing.
 
-## Verifikasi KM-001 — 21 Oktober 2026
+## Verifikasi fondasi — 21 Oktober 2026
 
 - `make check`: Ruff/format, mypy strict (8 modul), ESLint, TypeScript, dan Prettier lulus.
 - React production build dan image API/web berhasil; ketiga service Compose healthy.
@@ -102,7 +109,7 @@ API host dan proxy Vite mengembalikan readiness 200. Penghentian launcher dengan
 SIGINT menutup proses API/web. Docker tetap hanya untuk infra dalam alur development;
 Dockerfile dipakai untuk build/preview deployment.
 
-## Armada — KM-002
+## Armada
 
 ```sh
 make infra-up
@@ -200,3 +207,122 @@ make fleet-report ARGS='--unit KM-001 --depot ID_DEPOT'
 
 Verifikasi ini mencakup fondasi data dan metrik lokal. Chat, agent/tools, memory,
 RAG, dan deployment Dokploy mengikuti tiket masing-masing.
+
+## Chat persisten
+
+Empat tabel aplikasi `chat_threads`, `chat_messages`, `chat_runs`, dan `chat_events`
+berada pada database yang sama dengan armada dan tabel milik Procrastinate. ID
+chat memakai UUID; cursor event bigint dikirim sebagai string desimal. Setiap
+thread terikat identitas server. Payload yang mencoba mengirim `user_id` ditolak.
+
+`POST` pesan menerima `request_key` (1–128 karakter alfanumerik, `_`, `-`) dan
+`content` (1–20.000 karakter, tidak boleh kosong/whitespace). Scope key adalah
+thread milik pengguna. Payload yang sama persis mengembalikan run yang sama,
+termasuk setelah terminal/restart; perubahan whitespace juga dianggap perubahan
+payload. Key sama dengan content berbeda menghasilkan `409 REQUEST_KEY_CONFLICT`.
+Pesan baru saat thread memiliki run queued/running menghasilkan `409 THREAD_BUSY`.
+Pemeriksaan replay dilakukan sebelum pemeriksaan busy.
+
+Pesan, run, event awal, dan job Procrastinate di-commit dalam satu transaksi
+SQLAlchemy/psycopg. Procrastinate memakai koneksi transaksi yang sama; kegagalan
+job INSERT membatalkan semua penulisan. Lock baris thread menserialkan admission,
+claim, dan event; unique partial index juga membatasi satu run aktif per thread.
+Urutan event mengikuti commit, bukan sequence PostgreSQL yang dapat memiliki gap.
+
+Snapshot memakai transaksi repeatable-read, sehingga transcript/status dan
+`through_seq` merujuk kondisi yang sama. History mengambil maksimal 100 pesan
+terbaru, ditampilkan dari lama ke baru; `before_seq` mengambil halaman sebelumnya.
+`latest_run` mengikuti urutan pesan, bukan waktu awal transaksi. Event diberi
+nomor per thread; identitas deduplikasi adalah `(thread_id, seq)` dan message ID.
+
+| Method | Path (prefix `/api/chat`) | Hasil |
+| --- | --- | --- |
+| POST | `/threads` | 201, thread baru; body `{ "title": "Percakapan" }` opsional memakai `{}` |
+| GET | `/threads?limit=50&offset=0` | Daftar thread terbaru dan `next_offset` |
+| POST | `/threads/{id}/messages` | 202, `{ "run": ..., "replayed": false/true }` |
+| GET | `/threads/{id}/snapshot?limit=100` | Transcript, active/latest run, through_seq, before_seq |
+| GET | `/threads/{id}/runs/{run_id}` | Status run tersimpan |
+| GET | `/threads/{id}/events?after_seq=0&limit=100` | Halaman event; lanjut dengan next_after_seq |
+| GET | `/threads/{id}/stream?after_seq=0` | SSE replay/live dari ledger |
+
+SSE memakai `id` sebagai sequence; `Last-Event-ID` mengungguli query `after_seq`
+ketika reconnect. Gunakan `through_seq` snapshot untuk subscription awal. Cursor
+melampaui ledger ditolak dengan `409 CURSOR_AHEAD`; cursor invalid menghasilkan
+422. Heartbeat dikirim setiap sekitar 15 detik. Pembacaan memakai transaksi
+pendek tanpa memegang koneksi selama menunggu. Subscription tidak membuat run,
+job, atau panggilan provider. Nginx menonaktifkan buffering SSE.
+
+Worker Procrastinate mengklaim queued run satu kali lalu menyimpan event running
+serta hasil terminal. **Executor LangChain belum tersedia**; worker
+saat ini mengakhiri run dengan `failed / AGENT_NOT_CONFIGURED`, tanpa pesan
+asisten palsu. Job delivery Procrastinate dapat berstatus succeeded sementara
+run aplikasi failed: delivery berhasil, tetapi executor belum tersedia. Pending
+job tetap tersimpan ketika worker belum berjalan. Recovery run yang sudah
+running saat worker mati, lease/ownership lanjutan, cancel/retry, serta publikasi
+hasil agent belum diimplementasikan. Jangan menganggap restart worker sebagai bukti
+recovery agent pada tahap ini.
+
+Procrastinate dipin ke 3.10.0. Migrasi 0002 menyertakan snapshot SQL upstream dan
+lisensi MIT agar upgrade dependency tidak mengubah migrasi historis. Migrasi
+ulang merupakan no-op. Downgrade 0002 ditolak untuk menjaga data chat/queue;
+rollback versi database membutuhkan backup. Upgrade Procrastinate berikutnya
+harus membawa migrasi upstream yang sesuai.
+
+### Konfigurasi model
+
+Root `.env` memakai `OPENAI_API_KEY` dan `OPENROUTER_API_KEY`; keduanya disimpan
+sebagai SecretStr dan hanya diteruskan ke backend/worker. Konfigurasi yang
+tersedia untuk integrasi agent:
+
+```dotenv
+KIMMY_CHAT_PROVIDER=openai
+KIMMY_OPENAI_CHAT_MODEL=gpt-6-luna
+KIMMY_OPENROUTER_CHAT_MODEL=deepseek/deepseek-v4.1-flash-1017
+```
+
+Nama Luna pada [katalog resmi OpenAI](https://developers.openai.com/api/docs/models)
+adalah `gpt-6-luna`, bukan `gpt-6.1-luna`. Model OpenRouter mengikuti permintaan
+pengguna. Konfigurasi ini belum membuktikan akses key, panggilan provider,
+streaming token, ataupun checkpoint LangChain; belum ada panggilan model.
+
+### Walkthrough manual dan hasil — 21 Oktober 2026
+
+Verifikasi HTTP/SQL dijalankan dengan API dan worker sebagai proses terpisah,
+menggunakan database sementara. Tidak ada framework testing/eval/Playwright
+atau dependency baru untuk pengujian.
+
+1. Migrasi database kosong hingga 0002 berhasil; pengulangan no-op dan Alembic
+   metadata comparison tidak menemukan drift. Migrasi database lokal utama
+   menambahkan chat/queue tanpa mengubah tabel/data armada.
+2. 24 POST identik bersamaan menghasilkan tepat satu message, satu run, dan satu
+   delivery. Replay memiliki run ID yang sama. Payload berbeda ditolak; pesan
+   baru pada thread aktif ditolak. Pemalsuan identitas tidak mengubah pemilik.
+3. Trigger sementara memaksa INSERT job PostgreSQL gagal. Respons 500 diikuti
+   snapshot kosong, cursor 0, tanpa run/event/job. Setelah trigger dilepas,
+   request key yang sama dapat dikirim kembali dan berhasil.
+4. API dihentikan dan dijalankan ulang sebelum worker mulai. Snapshot, status,
+   cursor, dan replay request identik. SSE Last-Event-ID=1 melanjutkan dari event
+   2; membuka/menutup subscription tidak mengubah data atau menambah job.
+5. Worker terpisah memproses job setelah seluruh subscription ditutup:
+   queued → running → failed dengan AGENT_NOT_CONFIGURED. Tidak ada pesan asisten.
+   Duplikasi delivery untuk run terminal tidak menambah event atau mengklaim ulang.
+6. Empat pesan menghasilkan event 1–16 berurutan. Pagination history dan event
+   lengkap tanpa overlap; cursor invalid/ahead ditolak. Akses thread pengguna
+   lain ditolak pada snapshot, run, events, stream, dan admission.
+7. `make check` dan `make build` lulus; tipe frontend dihasilkan ulang dari OpenAPI.
+8. Boot Compose berhasil: migrate selesai sebelum API/worker, API dan web healthy,
+   worker memproses job. Snapshot dan replay SSE melalui Nginx port 8080 berhasil.
+   Pemeriksaan environment/build memastikan kedua API key hanya mencapai backend
+   dan tidak terdapat dalam bundle frontend. Tidak ada panggilan provider.
+9. Urutan latest_run diverifikasi tetap mengikuti sequence pesan walaupun waktu
+   transaksi run terakhir dibuat lebih lama dalam database probe. Database probe
+   dihapus setelah walkthrough; satu thread bukti Docker tetap ada di database lokal.
+10. API development port 9000 dan proxy Vite port 5173 yang sedang berjalan
+    berhasil membaca kembali transcript dari walkthrough Docker pada database sama.
+
+Contoh walkthrough lewat Swagger di `http://localhost:9000/docs`: buat thread,
+kirim `{ "request_key": "demo-1", "content": "Periksa armada" }`, kirim ulang,
+lalu buka snapshot. Untuk melihat queued sebelum worker tersedia, jalankan hanya
+`make dev-api`; mulai `make dev-worker` setelah pesan diterima. Saat worker sudah
+berjalan, status failed yang eksplisit adalah hasil yang diharapkan sampai
+executor agent tersedia.

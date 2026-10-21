@@ -1,4 +1,12 @@
 name: kimmy
+x-backend-environment: &backend-environment
+  KIMMY_DATABASE_URL: postgresql+psycopg://kimmy:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/kimmy
+  KIMMY_DEMO_USER_ID: ${KIMMY_DEMO_USER_ID:-demo-user}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  KIMMY_CHAT_PROVIDER: ${KIMMY_CHAT_PROVIDER:-openai}
+  KIMMY_OPENAI_CHAT_MODEL: ${KIMMY_OPENAI_CHAT_MODEL:-gpt-6-luna}
+  KIMMY_OPENROUTER_CHAT_MODEL: ${KIMMY_OPENROUTER_CHAT_MODEL:-deepseek/deepseek-v4.1-flash-1017}
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -19,17 +27,41 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    environment:
-      KIMMY_DATABASE_URL: postgresql+psycopg://kimmy:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/kimmy
-      KIMMY_DEMO_USER_ID: ${KIMMY_DEMO_USER_ID:-demo-user}
+    environment: *backend-environment
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/ready', timeout=6)"]
       interval: 10s
       timeout: 8s
       retries: 5
+    restart: unless-stopped
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["/app/.venv/bin/alembic", "upgrade", "head"]
+    environment:
+      KIMMY_DATABASE_URL: postgresql+psycopg://kimmy:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/kimmy
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["/app/.venv/bin/python", "-m", "kimmy.jobs"]
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 30s
     restart: unless-stopped
   web:
     build:

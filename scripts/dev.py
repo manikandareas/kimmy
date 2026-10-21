@@ -21,12 +21,22 @@ def main() -> int:
         {
             key: value
             for key, value in values.items()
-            if key.startswith("KIMMY_") and value is not None
+            if (
+                key.startswith("KIMMY_")
+                or key in {"OPENAI_API_KEY", "OPENROUTER_API_KEY"}
+            )
+            and value is not None
         }
     )
     api_env["KIMMY_DATABASE_URL"] = values.get("KIMMY_DATABASE_URL") or (
         f"postgresql+psycopg://kimmy:{quote(password, safe='')}@127.0.0.1:54329/kimmy"
     )
+    web_env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("KIMMY_")
+        and key not in {"OPENAI_API_KEY", "OPENROUTER_API_KEY", "POSTGRES_PASSWORD"}
+    }
     commands = {
         "migrate": (
             [
@@ -76,12 +86,16 @@ def main() -> int:
             ],
             api_env,
         ),
+        "worker": (
+            ["uv", "run", "--project", "apps/api", "python", "-m", "kimmy.jobs"],
+            api_env,
+        ),
         "web": (
             ["pnpm", "--dir", "apps/web", "dev", "--port", "5173", "--strictPort"],
-            os.environ.copy(),
+            web_env,
         ),
     }
-    selected = [sys.argv[1]] if len(sys.argv) > 1 else ["api", "web"]
+    selected = [sys.argv[1]] if len(sys.argv) > 1 else ["api", "worker", "web"]
     children: list[subprocess.Popen[bytes]] = []
     stopping = False
 

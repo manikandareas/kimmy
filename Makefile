@@ -1,9 +1,9 @@
 COMPOSE = docker compose -f compose.yaml -f compose.local.yaml
-.PHONY: install dev down logs check format build api-types dev-api dev-web infra-up docker-dev migrate seed fleet-report
+.PHONY: install dev down logs check format build api-types dev-api dev-web dev-worker infra-up docker-dev migrate seed fleet-report
 install:
 	uv sync --project apps/api
 	pnpm --dir apps/web install --frozen-lockfile
-dev: infra-up
+dev: infra-up migrate
 	uv run --project apps/api python scripts/dev.py
 infra-up:
 	$(COMPOSE) up -d --wait postgres
@@ -35,6 +35,8 @@ dev-api:
 	uv run --project apps/api python scripts/dev.py api
 dev-web:
 	pnpm --dir apps/web dev --port 5173 --strictPort
+dev-worker:
+	uv run --project apps/api python scripts/dev.py worker
 migrate:
 	uv run --project apps/api python scripts/dev.py migrate
 seed:

@@ -14,7 +14,22 @@ class ErrorResponse(BaseModel):
     message: str
 
 
+class DomainError(Exception):
+    def __init__(self, status_code: int, code: str, message: str):
+        self.status_code = status_code
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
 def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(DomainError)
+    async def domain_error(request: Request, exc: DomainError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=ErrorResponse(code=exc.code, message=exc.message).model_dump(),
+        )
+
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
         return JSONResponse(
