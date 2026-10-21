@@ -1,5 +1,6 @@
 import math
 from pathlib import Path
+from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -13,6 +14,7 @@ from kimmy.knowledge.schemas import (
     IndexReceipt,
     SearchInput,
     SearchResult,
+    SourceChunk,
 )
 from kimmy.llm import embedding_model
 
@@ -115,3 +117,10 @@ class KnowledgeService:
             return SearchResult(
                 citations=await repo.search(vector, self.identity, request.limit)
             )
+
+    async def source(self, chunk_id: UUID) -> SourceChunk:
+        async with AsyncSession(self.engine) as session:
+            source = await KnowledgeRepository(session).source(chunk_id)
+            if source is None:
+                raise DomainError(404, "SOURCE_NOT_FOUND", "SOP source not found")
+            return source

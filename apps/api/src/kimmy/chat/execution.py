@@ -10,13 +10,17 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.errors import GraphRecursionError
 
+from kimmy.agent.citations import resolve_citations
 from kimmy.agent.context import AgentContext
 from kimmy.agent.factory import AgentGraph, build_agent
 from kimmy.agent.tools import fleet_tools
 from kimmy.agent.tools.memory import memory_tools
+from kimmy.agent.tools.search_knowledge import build_tool as knowledge_tool
 from kimmy.chat.service import ChatService
 from kimmy.config import Settings
 from kimmy.errors import DomainError
+from kimmy.knowledge.schemas import Citation, SearchResult
+from kimmy.knowledge.service import KnowledgeService
 from kimmy.llm import ModelConfigurationError, chat_model
 from kimmy.memory.service import MemoryService
 
@@ -36,7 +40,7 @@ async def stream_answer(
     content: str,
     parent_checkpoint: str | None,
     settings: Settings,
-) -> tuple[str, str]:
+) -> tuple[str, str, list[Citation]]:
     config: RunnableConfig = {
         "configurable": {
             "thread_id": str(context.thread_id),
@@ -50,6 +54,7 @@ async def stream_answer(
         if not previous.values or previous.next:
             raise InvalidAgentResult("Successful checkpoint is missing or unfinished")
 
+    received: dict[UUID, Citation] = {}
     pending = ""
     pending_id: str | None = None
     flushed_at = monotonic()
@@ -116,6 +121,12 @@ async def stream_answer(
                                 call["id"],
                             )
                     elif isinstance(message, ToolMessage):
+                        if (
+                            message.name == "search_knowledge"
+                            and message.status == "success"
+                        ):
+                            artifact = SearchResult.model_validate(message.artifact)
+                            received.update((c.chunk_id, c) for c in artifact.citations)
                         await service.progress(
                             context,
                             "tool.completed",
@@ -146,7 +157,11 @@ async def stream_answer(
     checkpoint_id = latest.config.get("configurable", {}).get("checkpoint_id")
     if latest.next or not isinstance(checkpoint_id, str):
         raise InvalidAgentResult("Final checkpoint is not complete")
-    return final.text, checkpoint_id
+    try:
+        citations = resolve_citations(final.text, received)
+    except ValueError as error:
+        raise InvalidAgentResult("Invalid source citation") from error
+    return final.text, checkpoint_id, citations
 
 
 class AgentExecutor:
@@ -169,13 +184,18 @@ class AgentExecutor:
                         self.saver,
                         self.settings,
                         fleet_tools(self.service.engine)
-                        + memory_tools(MemoryService(self.service.engine)),
+                        + memory_tools(MemoryService(self.service.engine))
+                        + [
+                            knowledge_tool(
+                                KnowledgeService(self.service.engine, self.settings)
+                            )
+                        ],
                         MemoryService(self.service.engine),
                     )
-                    answer, checkpoint_id = await stream_answer(
+                    answer, checkpoint_id, citations = await stream_answer(
                         agent, self.service, context, content, parent, self.settings
                     )
-                await self.service.complete(context, answer, checkpoint_id)
+                await self.service.complete(context, answer, checkpoint_id, citations)
             logger.info("Chat run completed run_id=%s", run_id)
             return
         except DomainError as error:

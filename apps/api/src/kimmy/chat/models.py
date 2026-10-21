@@ -45,6 +45,9 @@ class Message(ChatBase):
     seq: Mapped[int] = mapped_column(BigInteger)
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
+    citations: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

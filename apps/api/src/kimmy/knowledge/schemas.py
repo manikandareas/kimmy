@@ -23,7 +23,7 @@ class EmbeddingIdentity(BaseModel):
     dimensions: int
 
 
-class Citation(BaseModel):
+class SourceChunk(BaseModel):
     chunk_id: UUID
     document_id: UUID
     source: str
@@ -32,6 +32,9 @@ class Citation(BaseModel):
     version: str
     effective_date: date
     quote: str
+
+
+class Citation(SourceChunk):
     score: float
 
 

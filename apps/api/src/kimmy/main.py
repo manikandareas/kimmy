@@ -13,6 +13,7 @@ from kimmy.database import create_engine
 from kimmy.dependencies import DemoIdentity, get_demo_identity
 from kimmy.errors import ErrorResponse, register_error_handlers
 from kimmy.jobs.queue import create_queue
+from kimmy.knowledge.router import router as knowledge_router
 from kimmy.memory.router import router as memory_router
 
 
@@ -40,6 +41,7 @@ app = FastAPI(
 register_error_handlers(app)
 app.include_router(chat_router)
 app.include_router(memory_router)
+app.include_router(knowledge_router)
 
 
 @app.get("/api/health/live")

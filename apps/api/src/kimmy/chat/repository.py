@@ -90,12 +90,15 @@ class ChatRepository:
             .limit(1)
         )
 
-    async def create_answer(self, thread: Thread, content: str) -> Message:
+    async def create_answer(
+        self, thread: Thread, content: str, citations: list[dict[str, object]]
+    ) -> Message:
         message = Message(
             thread_id=thread.id,
             seq=thread.last_seq + 1,
             role="assistant",
             content=content,
+            citations=citations,
         )
         self.session.add(message)
         await self.session.flush()

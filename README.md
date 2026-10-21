@@ -4,7 +4,7 @@ Asisten operasional armada. Implementasi saat ini mencakup **fondasi repository 
 **skema, seed, dan metrik armada**, serta **chat persisten,
 admission run, dan queue worker**, serta **agent LangChain dengan provider
 OpenAI/OpenRouter dan checkpoint PostgreSQL**, **lima tool analisis armada**,
-**memory umum lintas thread**, serta **indexing dan pencarian tiga SOP**.
+**memory umum lintas thread**, serta **indexing dan pencarian tiga SOP**, **tool RAG dan citation tervalidasi**.
 
 ## Sumber spesifikasi
 
@@ -15,6 +15,7 @@ OpenAI/OpenRouter dan checkpoint PostgreSQL**, **lima tool analisis armada**,
 - [Tools analisis armada](https://app.notion.com/p/400abdd6187381b39f96d510b257ef60)
 - [Memory umum lintas thread](https://app.notion.com/p/400abdd6187381b5824fe0256442bbd9)
 - [Ingestion tiga SOP](https://app.notion.com/p/400abdd6187381b6b612c8891cb969e0)
+- [Tool RAG dan citation](https://app.notion.com/p/400abdd6187381a8977de3d79e4a5299)
 - [Architecture & Code](https://app.notion.com/p/400abdd61873812e9a69f25160d1a33d)
 - [Database Contract](https://app.notion.com/p/400abdd6187381e1968dd6232f7c0e14)
 
@@ -87,7 +88,7 @@ CRUD atau dashboard armada.
 
 Tidak ada dependency testing, eval, atau Playwright. Verifikasi menggunakan static
 checks, build, HTTP langsung, dan walkthrough browser. Chat persisten kini tersedia
-melalui API bersama agent/provider dan tools armada. UI chat, integrasi tool RAG, panel memory, dan
+melalui API bersama agent/provider dan tools armada. UI chat, panel memory, dan
 deployment produksi mengikuti tiket masing-masing.
 
 ## Verifikasi fondasi — 21 Oktober 2026
@@ -631,7 +632,7 @@ repeatable-read, versi aktif, cosine similarity pgvector, dan maksimal lima
 hasil (default tiga). Hasil merupakan kandidat retrieval; score bukan bukti
 kebenaran atau jaminan relevansi. Citation memuat ID chunk/dokumen, sumber,
 judul, bagian, versi, tanggal berlaku, kutipan utuh, dan score. Pembuatan jawaban
-agent/citation reader mengikuti KM-008/KM-009.
+agent tersedia melalui KM-008; citation reader visual mengikuti KM-009.
 
 Tabel `knowledge_*` dikelola migrasi SQL eksplisit karena kolom vector; tabel itu
 dikecualikan dari autogenerate ORM. Container API/worker menyertakan direktori
@@ -678,3 +679,62 @@ data armada lokal tidak diubah.
 
 UI panel memory, tool RAG pada agent, dan dialog sumber belum menjadi bagian
 kedua tiket ini. Tidak ada commit/push atau deployment Dokploy.
+
+## Tool RAG dan citation — KM-008
+
+Agent kini memiliki `search_knowledge` yang memanggil service retrieval KM-007.
+Pencarian dibatasi maksimal lima chunk dan timeout 15 detik; error konfigurasi
+corpus dibedakan dari layanan yang gagal. Hasil adalah kandidat bukti, sehingga
+agent tetap harus menilai dukungannya terhadap pertanyaan. Angka operasional
+berasal dari tools armada; SOP memberi prosedur, bukan bukti penyebab pasti.
+
+Jawaban memakai marker `[SOP:<chunk UUID>]`. Sebelum publikasi final, backend
+memvalidasi setiap marker terhadap artifact hasil pencarian pada run yang sama.
+ID tidak dikenal, malformed, atau marker yang tidak lengkap menggagalkan run
+sebagai `AGENT_INVALID_RESULT`. Metadata berasal dari hasil service, bukan teks
+buatan model. Citation berulang disatukan; chunk yang tidak dirujuk tidak masuk
+metadata pesan. Untuk mengutip kembali SOP dari history, agent mencari ulang.
+Validasi ini membuktikan asal sumber, bukan otomatis membuktikan bahwa setiap
+klaim semantik didukung kutipan; relevansi tetap diperiksa saat walkthrough.
+
+Migrasi `0006` menambah `chat_messages.citations` dengan default array kosong
+untuk pesan lama/pengguna. Jawaban dan citation tersimpan dalam transaksi yang
+sama sebelum status run completed. Snapshot/history dan event `message.created`
+membawa metadata yang sama. Event `agent.text_delta` tetap merupakan teks
+provisional; UI hanya boleh membuat tautan sumber dari `message.citations`
+yang sudah tervalidasi, bukan menafsirkan marker delta sebagai sumber sah.
+
+`GET /api/knowledge/sources/{chunk_id}` mengembalikan dokumen, judul, bagian,
+versi, tanggal berlaku, dan kutipan persis. Corpus tunggal dapat dibaca dengan
+identitas demo server. Endpoint ini tidak memanggil embedding/provider dan
+mendukung versi dokumen yang sudah tidak aktif agar citation lama tetap terbaca.
+ID tidak ditemukan menghasilkan `SOURCE_NOT_FOUND`/404; UUID invalid 422.
+Tipe respons tersedia melalui OpenAPI dan tipe frontend hasil generate.
+
+Dialog citation visual tetap mengikuti KM-009. Tidak ada upload, dashboard,
+perubahan kontrak armada, atau dependency testing/eval/Playwright tambahan.
+
+### Walkthrough manual KM-008 — 21 Oktober 2026
+
+- API HTTP dan worker terpisah memakai PostgreSQL disposable, seed armada,
+  serta provider chat OpenAI dan embedding nyata. Database/proses probe dibersihkan.
+- Pertanyaan BBM KM-001 untuk periode seed memanggil `analyze_fuel_consumption`
+  dan `search_knowledge`: 20 L/100 km, 29 interval, serta Rp29.900.000 belanja.
+  Jawaban menjelaskan coverage, keterlambatan, perpindahan depot, dan tidak
+  menyatakan korelasi sebagai penyebab pasti.
+- Semua citation cocok dengan dokumen, bagian, versi, tanggal, dan kutipan dari
+  endpoint sumber. Pertanyaan lanjutan mencari ulang SOP pada run baru.
+- Snapshot dan event pesan memuat citation identik. Setelah dokumen dinonaktifkan
+  dalam database disposable, sumber versi lama serta metadata history tetap terbaca.
+- Pertanyaan asuransi satelit menyatakan dukungan SOP tidak tersedia, tanpa
+  citation yang tidak relevan. Walkthrough awal menemukan citation tidak relevan
+  pada jawaban keterbatasan; aturan prompt diperjelas dan walkthrough diulang lulus.
+- Probe validator menolak ID tidak diterima, marker malformed/tidak lengkap,
+  serta menyatukan citation berulang. Endpoint source mengembalikan 404/422
+  untuk sumber tidak ditemukan/UUID invalid.
+- `make check` dan `make build` lulus; tipe OpenAPI diperbarui dan migrasi `0006`
+  diterapkan lokal. Tidak ada commit/push atau deployment Dokploy.
+- Probe SOP pada database disposable menyisipkan instruksi palsu untuk mengubah
+  memory dan mencetak penanda khusus. Agent tetap menjelaskan prosedur berbasis
+  sumber; tidak memanggil tool memory dan tidak mengeluarkan penanda tersebut.
+  Ini bukti skenario manual, bukan jaminan universal terhadap prompt injection.

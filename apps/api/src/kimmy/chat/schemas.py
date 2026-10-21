@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from kimmy.knowledge.schemas import Citation
+
 # Cursors are decimal strings on the wire, just like other PostgreSQL bigints.
 Cursor = Annotated[str, Field(pattern=r"^(0|[1-9][0-9]{0,18})$")]
 RunStatus = Literal["queued", "running", "completed", "failed"]
@@ -53,6 +55,7 @@ class MessageView(BaseModel):
     seq: Cursor
     role: Literal["user", "assistant"]
     content: str
+    citations: list[Citation] = Field(default_factory=list)
     created_at: datetime
 
 

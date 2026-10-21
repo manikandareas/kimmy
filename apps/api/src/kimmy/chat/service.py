@@ -23,6 +23,7 @@ from kimmy.chat.schemas import (
 )
 from kimmy.errors import DomainError
 from kimmy.jobs.queue import enqueue_run
+from kimmy.knowledge.schemas import Citation
 from kimmy.memory.repository import MemoryRepository
 from kimmy.memory.service import require_generation
 
@@ -45,6 +46,7 @@ def message_view(message: Message) -> MessageView:
             "seq": str(message.seq),
             "role": message.role,
             "content": message.content,
+            "citations": message.citations,
             "created_at": message.created_at,
         }
     )
@@ -260,7 +262,11 @@ class ChatService:
             await repo.append_event(thread, run, kind, payload)
 
     async def complete(
-        self, context: AgentContext, content: str, checkpoint_id: str
+        self,
+        context: AgentContext,
+        content: str,
+        checkpoint_id: str,
+        citations: list[Citation],
     ) -> None:
         async with self.repository() as repo:
             state = await MemoryRepository(repo.session).lock(context.user_id)
@@ -271,7 +277,9 @@ class ChatService:
             run = await repo.run(context.run_id, context.thread_id)
             if run is None or run.status != "running":
                 raise DomainError(409, "RUN_NOT_RUNNING", "Run is not running")
-            answer = await repo.create_answer(thread, content)
+            answer = await repo.create_answer(
+                thread, content, [c.model_dump(mode="json") for c in citations]
+            )
             await repo.append_event(
                 thread,
                 run,

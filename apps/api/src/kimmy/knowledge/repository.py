@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kimmy.knowledge.schemas import Citation, Document, EmbeddingIdentity
+from kimmy.knowledge.schemas import Citation, Document, EmbeddingIdentity, SourceChunk
 
 
 class KnowledgeRepository:
@@ -138,3 +138,21 @@ class KnowledgeRepository:
             )
         ).mappings()
         return [Citation.model_validate(dict(row)) for row in rows]
+
+    async def source(self, chunk_id: UUID) -> SourceChunk | None:
+        row = (
+            (
+                await self.session.execute(
+                    text("""
+            SELECT c.id AS chunk_id, d.id AS document_id, d.slug AS source,
+                   d.title, c.section, d.version, d.effective_date, c.content AS quote
+            FROM knowledge_chunks c JOIN knowledge_documents d ON d.id=c.document_id
+            WHERE c.id=:id
+        """),
+                    {"id": chunk_id},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return SourceChunk.model_validate(dict(row)) if row else None

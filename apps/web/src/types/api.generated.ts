@@ -159,6 +159,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/knowledge/sources/{chunk_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Source */
+        get: operations["read_source_api_knowledge_sources__chunk_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health/live": {
         parameters: {
             query?: never;
@@ -219,6 +236,36 @@ export interface components {
             run: components["schemas"]["RunView"];
             /** Replayed */
             replayed: boolean;
+        };
+        /** Citation */
+        Citation: {
+            /**
+             * Chunk Id
+             * Format: uuid
+             */
+            chunk_id: string;
+            /**
+             * Document Id
+             * Format: uuid
+             */
+            document_id: string;
+            /** Source */
+            source: string;
+            /** Title */
+            title: string;
+            /** Section */
+            section: string;
+            /** Version */
+            version: string;
+            /**
+             * Effective Date
+             * Format: date
+             */
+            effective_date: string;
+            /** Quote */
+            quote: string;
+            /** Score */
+            score: number;
         };
         /** CreateThread */
         CreateThread: {
@@ -360,6 +407,8 @@ export interface components {
             role: "user" | "assistant";
             /** Content */
             content: string;
+            /** Citations */
+            citations?: components["schemas"]["Citation"][];
             /**
              * Created At
              * Format: date-time
@@ -418,6 +467,34 @@ export interface components {
             through_seq: string;
             /** Before Seq */
             before_seq: string | null;
+        };
+        /** SourceChunk */
+        SourceChunk: {
+            /**
+             * Chunk Id
+             * Format: uuid
+             */
+            chunk_id: string;
+            /**
+             * Document Id
+             * Format: uuid
+             */
+            document_id: string;
+            /** Source */
+            source: string;
+            /** Title */
+            title: string;
+            /** Section */
+            section: string;
+            /** Version */
+            version: string;
+            /**
+             * Effective Date
+             * Format: date
+             */
+            effective_date: string;
+            /** Quote */
+            quote: string;
         };
         /** ThreadPage */
         ThreadPage: {
@@ -1029,6 +1106,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryReceipt"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_source_api_knowledge_sources__chunk_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chunk_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceChunk"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Unprocessable Content */
