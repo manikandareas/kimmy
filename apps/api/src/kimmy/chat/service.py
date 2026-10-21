@@ -23,6 +23,8 @@ from kimmy.chat.schemas import (
 )
 from kimmy.errors import DomainError
 from kimmy.jobs.queue import enqueue_run
+from kimmy.memory.repository import MemoryRepository
+from kimmy.memory.service import require_generation
 
 
 def thread_view(thread: Thread) -> ThreadView:
@@ -227,22 +229,28 @@ class ChatService:
     async def execution_input(
         self, thread_id: UUID, user_id: str, run_id: UUID
     ) -> tuple[AgentContext, str, str | None]:
-        async with self.repository(read_only=True) as repo:
+        async with self.repository() as repo:
+            state = await MemoryRepository(repo.session).lock(user_id)
             thread = await self.require_thread(repo, thread_id, user_id)
             run = await repo.run(run_id, thread_id)
             if run is None or run.status != "running":
                 raise DomainError(409, "RUN_NOT_RUNNING", "Run is not running")
+            run.memory_generation = state.generation
             message = await repo.input_message(run)
             return (
-                AgentContext(thread.user_id, thread.id, run.id, message.id),
+                AgentContext(
+                    thread.user_id, thread.id, run.id, message.id, state.generation
+                ),
                 message.content,
-                await repo.completed_checkpoint(thread_id),
+                await repo.completed_checkpoint(thread_id, state.generation),
             )
 
     async def progress(
         self, context: AgentContext, kind: str, payload: dict[str, object]
     ) -> None:
         async with self.repository() as repo:
+            state = await MemoryRepository(repo.session).lock(context.user_id)
+            require_generation(state.generation, context.memory_generation)
             thread = await self.require_thread(
                 repo, context.thread_id, context.user_id, lock=True
             )
@@ -255,6 +263,8 @@ class ChatService:
         self, context: AgentContext, content: str, checkpoint_id: str
     ) -> None:
         async with self.repository() as repo:
+            state = await MemoryRepository(repo.session).lock(context.user_id)
+            require_generation(state.generation, context.memory_generation)
             thread = await self.require_thread(
                 repo, context.thread_id, context.user_id, lock=True
             )
@@ -268,7 +278,10 @@ class ChatService:
                 "message.created",
                 {"message": message_view(answer).model_dump(mode="json")},
             )
-            run.checkpoint_id = checkpoint_id
+            run.memory_generation = context.memory_generation
+            # A mutation turn may itself quote revoked content. Do not carry
+            # that turn into the next model context; UI history stays intact.
+            run.checkpoint_id = None if context.reset_history else checkpoint_id
             run.status = "completed"
             run.finished_at = datetime.now(UTC)
             await repo.append_event(

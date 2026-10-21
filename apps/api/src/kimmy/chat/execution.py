@@ -13,9 +13,12 @@ from langgraph.errors import GraphRecursionError
 from kimmy.agent.context import AgentContext
 from kimmy.agent.factory import AgentGraph, build_agent
 from kimmy.agent.tools import fleet_tools
+from kimmy.agent.tools.memory import memory_tools
 from kimmy.chat.service import ChatService
 from kimmy.config import Settings
+from kimmy.errors import DomainError
 from kimmy.llm import ModelConfigurationError, chat_model
+from kimmy.memory.service import MemoryService
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +168,9 @@ class AgentExecutor:
                         model,
                         self.saver,
                         self.settings,
-                        fleet_tools(self.service.engine),
+                        fleet_tools(self.service.engine)
+                        + memory_tools(MemoryService(self.service.engine)),
+                        MemoryService(self.service.engine),
                     )
                     answer, checkpoint_id = await stream_answer(
                         agent, self.service, context, content, parent, self.settings
@@ -173,6 +178,8 @@ class AgentExecutor:
                 await self.service.complete(context, answer, checkpoint_id)
             logger.info("Chat run completed run_id=%s", run_id)
             return
+        except DomainError as error:
+            code = error.code
         except ModelConfigurationError:
             code = "AGENT_NOT_CONFIGURED"
         except TimeoutError:

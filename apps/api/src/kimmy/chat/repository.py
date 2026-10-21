@@ -75,11 +75,17 @@ class ChatRepository:
             raise RuntimeError("Run input message is missing")
         return message
 
-    async def completed_checkpoint(self, thread_id: UUID) -> str | None:
+    async def completed_checkpoint(
+        self, thread_id: UUID, generation: int
+    ) -> str | None:
         return await self.session.scalar(
             select(Run.checkpoint_id)
             .join(Message, Run.message_id == Message.id)
-            .where(Run.thread_id == thread_id, Run.status == "completed")
+            .where(
+                Run.thread_id == thread_id,
+                Run.status == "completed",
+                Run.memory_generation == generation,
+            )
             .order_by(Message.seq.desc())
             .limit(1)
         )

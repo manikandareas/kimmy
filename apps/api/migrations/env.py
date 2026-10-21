@@ -8,6 +8,7 @@ from kimmy.chat.models import ChatBase
 from kimmy.config import get_settings
 from kimmy.database import create_engine
 from kimmy.fleet.models import Base
+from kimmy.memory import models as memory_models  # noqa: F401
 
 
 def include_name(
