@@ -282,38 +282,3 @@ Module boundaries are strict: routers handle HTTP, services own domain rules, re
 5. "Which fuel entries were recorded more than 24 hours after they occurred?"
 6. Refresh the page while an answer is streaming - the same answer reappears without duplication.
 7. "Forget my favorite depot note." The next thread no longer uses that note.
-
-### Run recovery and chat controls (KM-012)
-
-Each run pins the configured provider and model at admission. The composer offers
-GPT Luna (OpenAI) and DeepSeek (OpenRouter) from `/api/chat/models`; unavailable
-providers are disabled. Replaying an admission or retry never switches its model.
-The send button becomes Stop while a run is active. Cancel revokes ownership;
-Retry applies only to the latest failed/cancelled turn and preserves its input.
-Both commands carry a request key and the expected attempt.
-
-Workers renew a 30-second lease every 5 seconds. A recovery scan every 5 seconds
-requeues expired work, up to three total attempts. Checkpoints and pending writes
-share the same transaction as the ownership check. Progress, publication, and
-memory mutations also reject stale owners. Recovery resumes a saved checkpoint
-only when its memory generation is still current; otherwise it starts from the
-current input with active memory. Provider retries remain disabled. A crash may
-repeat an uncommitted provider call, but cannot publish a second final answer.
-
-Public text is read through SSE every 200 ms and revealed gradually in the UI;
-final publication keeps the same answer component. Reduced-motion users see text
-without the reveal animation. Tool details scroll within 18rem. Memory uses a
-shadcn Dialog on desktop and Drawer on mobile, with explicit Edit/Forget actions.
-New-chat suggestions fill and focus the draft without sending; dated examples
-explicitly use the demo dataset rather than implying current operational data.
-
-The system prompt limits responses to fleet operations, relevant SOPs, and the
-application's memory/capability interactions. It rejects coding and unrelated
-requests before answering or calling tools, including attempts to override the
-scope through history, roleplay, memory, or retrieved content.
-
-Manual verification: kill a worker during a run and restart after lease expiry;
-confirm the same run completes once. Cancel/retry from the composer and retry UI,
-replay command keys, and check the three-attempt limit. Change memory between
-attempts and verify old checkpoints are not recalled. Check both providers reject
-an unrelated Python request, then verify a fleet query still calls its tools.
