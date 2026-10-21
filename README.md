@@ -210,16 +210,23 @@ Data principles:
 Copy `.env.example` to `.env` and fill in:
 
 ```bash
-DATABASE_URL=postgresql://kimmy:kimmy@postgres:5432/kimmy
-LLM_PROVIDER=openrouter            # or openai
+POSTGRES_PASSWORD=replace-with-url-safe-random-password
+KIMMY_CHAT_PROVIDER=openai         # or openrouter
 OPENROUTER_API_KEY=                # fill in per provider
 OPENAI_API_KEY=
-LLM_MODEL=openai/gpt-4o-mini
-EMBEDDING_MODEL=openai/text-embedding-3-small
-DEMO_USER_ID=demo
+KIMMY_OPENAI_CHAT_MODEL=gpt-6-luna
+KIMMY_OPENROUTER_CHAT_MODEL=deepseek/deepseek-v4.1-flash-1017
+KIMMY_OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+KIMMY_DEMO_USER_ID=demo-user
 ```
 
 ### Deployment (Dokploy)
+
+The agent receives a fresh UTC server timestamp in its system prompt on every
+execution, including retries. Relative dates are interpreted in the user's
+explicit timezone or the relevant depot timezone. Calendar weeks start Monday;
+calendar months are distinct from rolling seven-day periods. Answers state the
+absolute dates and timezone used, and demo dataset dates never replace today.
 
 1. Connect the repository to a Dokploy Docker Compose service with `compose.yaml` as the compose path.
 2. Fill in the environment: database, chat provider/model, embedding provider/model, and the demo user identity.

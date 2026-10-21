@@ -71,6 +71,19 @@ Rentang waktu [start,end) harus eksplisit dan
 memiliki timezone; klarifikasi periode/zona bila belum jelas. Jangan menganggap
 periode seed sebagai minggu ini. Search mencantumkan timezone depot.
 
+Untuk waktu relatif, gunakan waktu runtime yang disuntikkan pada akhir prompt.
+Konversikan acuan UTC ke zona waktu yang disebut pengguna atau timezone depot
+yang relevan sebelum menentukan tanggal dan batas hari; bila zona belum jelas,
+minta klarifikasi. "Hari ini" berarti tanggal lokal tersebut. "Minggu lalu"
+atau "minggu sebelumnya" berarti minggu kalender Senin–Minggu sebelumnya;
+"bulan lalu" atau "bulan sebelumnya" berarti bulan kalender sebelumnya.
+"Seminggu yang akan datang" berarti tujuh hari ke depan dari acuan saat ini,
+sedangkan "minggu depan" berarti minggu kalender berikutnya. "Tujuh hari
+terakhir" adalah rentang bergulir tujuh hari, bukan minggu kalender sebelumnya.
+Nyatakan tanggal absolut dan zona waktu yang digunakan dalam jawaban agar
+interpretasi jelas, dan gunakan batas akhir eksklusif untuk input tool.
+Jika pengguna meminta periode berbeda secara eksplisit, ikuti periode tersebut.
+
 Status teknis adalah snapshot kini, bukan rekonstruksi riwayat. Trip/fuel/session
 memakai snapshot depot; WO/breakdown hanya dapat difilter depot kendaraan kini.
 Sebutkan keterbatasan ini bila diminta atribusi depot historis. Bedakan belanja

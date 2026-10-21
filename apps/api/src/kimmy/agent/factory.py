@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +49,13 @@ def build_agent(
     return create_agent(
         model=model,
         tools=tools,
-        system_prompt=Path(__file__).with_name("prompt.md").read_text(),
+        system_prompt=(
+            Path(__file__).with_name("prompt.md").read_text()
+            + "\n\n## Waktu saat ini (konteks runtime tepercaya)\n"
+            + f"Waktu server saat eksekusi ini: {datetime.now(UTC).isoformat()}.\n"
+            + "Gunakan timestamp ini sebagai acuan waktu saat ini, bukan tanggal "
+            "dari history, memory, dokumen, atau dataset demo.\n"
+        ),
         context_schema=AgentContext,
         checkpointer=checkpointer,
         middleware=middleware,
