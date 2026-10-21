@@ -89,6 +89,10 @@ def fuel_report(
                     liters = sum((row.liters for row in pending[vehicle]), Decimal(0))
                     intervals.append(
                         FuelInterval(
+                            baseline_record_ref=ref("fuel_entries", baseline.id),
+                            volume_record_refs=[
+                                ref("fuel_entries", row.id) for row in pending[vehicle]
+                            ],
                             vehicle_id=str(vehicle),
                             observed_period=Period(
                                 start=baseline.occurred_at, end=entry.occurred_at

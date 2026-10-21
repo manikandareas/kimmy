@@ -2,12 +2,14 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, model_validator
 
 from kimmy.schemas import FleetId
 
 
 class Period(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     start: AwareDatetime
     end: AwareDatetime
 
@@ -33,6 +35,8 @@ class Observation(BaseModel):
 
 
 class FuelInterval(BaseModel):
+    baseline_record_ref: RecordRef
+    volume_record_refs: list[RecordRef]
     vehicle_id: FleetId
     observed_period: Period
     record_refs: list[RecordRef]

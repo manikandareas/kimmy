@@ -3,7 +3,7 @@
 Asisten operasional armada. Implementasi saat ini mencakup **fondasi repository dan boot lokal**,
 **skema, seed, dan metrik armada**, serta **chat persisten,
 admission run, dan queue worker**, serta **agent LangChain dengan provider
-OpenAI/OpenRouter dan checkpoint PostgreSQL**.
+OpenAI/OpenRouter dan checkpoint PostgreSQL**, serta **lima tool analisis armada**.
 
 ## Sumber spesifikasi
 
@@ -11,6 +11,7 @@ OpenAI/OpenRouter dan checkpoint PostgreSQL**.
 - [Data operasional armada dan metrik](https://app.notion.com/p/400abdd6187381a29c7adf973887d56e)
 - [Chat persisten dan queue worker](https://app.notion.com/p/400abdd6187381cd88a1fae5d6c37d06)
 - [Agent, provider, dan checkpoint](https://app.notion.com/p/400abdd6187381bfa087e80fc84d6355)
+- [Tools analisis armada](https://app.notion.com/p/400abdd6187381b39f96d510b257ef60)
 - [Architecture & Code](https://app.notion.com/p/400abdd61873812e9a69f25160d1a33d)
 - [Database Contract](https://app.notion.com/p/400abdd6187381e1968dd6232f7c0e14)
 
@@ -78,12 +79,13 @@ menyimpan status server; tipe HTTP berasal dari OpenAPI.
 Tidak ada konversi menjadi JavaScript number. Export OpenAPI menyertakan komponen
 kontrak ini untuk domain armada; endpoint armada belum tersedia.
 Tujuh tabel armada, seed 12 kendaraan/dua depot/60 hari, serta metrik tersedia
-melalui service dan CLI. Endpoint/tool armada mengikuti tiket berikutnya.
+melalui service dan CLI. Lima tool armada tersedia pada agent; tidak ada endpoint
+CRUD atau dashboard armada.
 
 Tidak ada dependency testing, eval, atau Playwright. Verifikasi menggunakan static
 checks, build, HTTP langsung, dan walkthrough browser. Chat persisten kini tersedia
-melalui API bersama agent/provider. UI chat, tools armada, memory, RAG, dan deployment produksi mengikuti
-tiket masing-masing.
+melalui API bersama agent/provider dan tools armada. UI chat, memory, RAG, dan
+deployment produksi mengikuti tiket masing-masing.
 
 ## Verifikasi fondasi — 21 Oktober 2026
 
@@ -431,3 +433,128 @@ Tidak ada dependency testing/eval/Playwright yang ditambahkan.
 
 Belum ada commit, push, atau deployment Dokploy. UI chat, tools analisis,
 memory/RAG, dan recovery worker crash tetap mengikuti tiket masing-masing.
+
+
+## Tools analisis armada — KM-005
+
+Lima tool read-only didaftarkan oleh `AgentExecutor` pada setiap run. Masing-masing
+berada di `agent/tools/`, memanggil `FleetAnalysisService` pada `fleet/analysis.py`,
+kemudian repository dan fungsi metrik yang sudah digunakan CLI. Tidak ada migrasi,
+perubahan seed, dependency baru, endpoint CRUD, atau UI baru untuk tiket ini.
+
+| Tool | Input dan semantik |
+| --- | --- |
+| `search_vehicles` | `unit_code` substring opsional, depot kini, status teknis; `limit` 1–50 (default 20), `offset`, dan `next_offset` untuk halaman selanjutnya |
+| `get_vehicle_activity` | Kode unit tepat dan periode wajib; trip berdasarkan actual departure, sesi berdasarkan started_at; depot snapshot |
+| `analyze_fuel_consumption` | Kode unit tepat dan periode wajib; belanja menurut occurred_at dan estimasi full-to-full; depot snapshot |
+| `get_maintenance_history` | Kode unit tepat; periode opsional memfilter opened_at; tanpa periode mengembalikan seluruh riwayat dan jadwal WO |
+| `get_breakdown_history` | Kode unit tepat dan periode wajib; history menurut reported_at, downtime dari union irisan interval, termasuk kejadian sebelum periode |
+
+Setiap argumen tool dibungkus dalam `request`. Contoh input analisis BBM:
+
+```json
+{
+  "request": {
+    "unit_code": "KM-001",
+    "period": {
+      "start": "2026-08-22T00:00:00Z",
+      "end": "2026-08-25T00:00:00Z"
+    },
+    "depot_id": null
+  }
+}
+```
+
+Periode timezone-aware memakai `[start,end)`, dengan start < end. Field tambahan
+pada request/periode ditolak. `depot_id` harus string desimal dan menunjuk depot
+yang ada. Search memberi kode/nama/zona depot beserta ID-nya. Filter depot hanya
+diisi bila pengguna meminta filter itu; depot kendaraan kini tidak otomatis
+menjadi filter riwayat per unit. WO/breakdown selalu melabelkan filter sebagai
+`current_vehicle_depot` dan menyatakan atribusi depot historis tidak tersedia.
+
+Hasil memiliki `status`, `method`, `record_refs`, `observed_period`, `coverage`,
+`depot_filter_basis`, `depot_filter`, dan `data` bertipe Pydantic. Search memakai
+observed_period null karena menampilkan snapshot kini; WO tanpa filter periode
+juga memakai null untuk seluruh riwayat. Waktu status kini berada di `status_as_of`.
+Interval full-to-full membedakan `baseline_record_ref` (odometer awal) dari
+`volume_record_refs` (seluruh pengisian penyumbang liter, termasuk partial atau
+meter invalid di tengah). Flag coverage boundary tidak berarti volume dibuang.
+Record detail mempertahankan ID bigint sebagai string desimal dan uang/rasio
+sebagai string Decimal. `record_refs` juga mencantumkan bukti status kendaraan
+kini; bukti perhitungan per bagian ada pada hasil metrik masing-masing.
+
+- `OK`: record terkait ditemukan, meskipun beberapa metrik belum tersedia.
+- `NO_DATA`: tidak ada record sesuai periode/filter; bukan bukti nilai metrik nol.
+- Error terstruktur: `INVALID_INPUT`, `VEHICLE_NOT_FOUND`, `SERVICE_UNAVAILABLE`,
+  atau `RESULT_TOO_LARGE`. Error tool diterbitkan dengan status error, bukan
+  hasil sukses palsu. Detail koneksi/database tidak dikirim ke model.
+- Batas pembacaan analisis 200 record sumber; aktivitas menghitung gabungan trip
+  dan sesi. Query mengambil maksimal 201 untuk mendeteksi overflow lalu menolak
+  agregat parsial. Persempit periode bila batas terlampaui. BBM membaca seluruh
+  depot dalam periode sebelum filtering agar interval lintas depot tidak terjembatani.
+- Setiap tool memiliki deadline 15 detik; batas model/tool call dan deadline run
+  tetap mengikuti konfigurasi agent KM-004. Sesi database per panggilan memakai
+  UTC dan transaksi repeatable-read/read-only. Tool paralel memiliki sesi terpisah.
+- Tidak ada preferensi pengguna yang dikirim melalui argumen tool. Konteks dan
+  identitas run berasal dari runtime server; log membawa run_id/tool_call_id.
+
+### Walkthrough manual KM-005 — 21 Oktober 2026
+
+Verifikasi memakai probe sementara tanpa dependency testing/eval/Playwright,
+HTTP API/worker terpisah, dan database PostgreSQL disposable untuk skenario yang
+menulis data. Database probe dihapus setelah selesai; armada lokal tidak diubah.
+
+1. Kelima tool dipanggil langsung melalui kontrak LangChain. Search menemukan 12
+   unit, pagination dan filter status sesuai; runtime tidak muncul pada schema
+   argumen model. Input ID numerik/overflow, identitas palsu, periode terbalik atau
+   tanpa timezone menghasilkan INVALID_INPUT. Unit tidak ditemukan dibedakan.
+2. Tiga hari pertama KM-001: baseline 50 L tidak masuk numerator; partial 40 L +
+   full 60 L untuk 500 km menghasilkan **20 L/100 km**, belanja **Rp1.500.000**.
+   Periode seed penuh menghasilkan 29 interval dan belanja **Rp29.900.000**.
+3. KM-001 berpindah MKS → PRE: masing-masing filter memiliki 30 trip dan 14
+   interval eligible; belanja MKS Rp14.900.000 dan PRE Rp15.000.000. Interval
+   lintas depot hanya masuk analisis tanpa filter. Pengisian terlambat 30 jam
+   tetap masuk periode occurred_at dan memiliki late_record_refs.
+4. KM-002 mempertahankan unknown, meter invalid/kosong, dan reset baseline.
+   Penghitungan ulang dari detail record cocok dengan semua interval dan belanja.
+   Meter invalid di tengah fixture 40+60 tetap menghasilkan 100 L/500 km.
+5. KM-002 memiliki **342 jam** engine-on lengkap; partial/none/null terpisah.
+   KM-012 mempertahankan jarak null dan sesi terbuka. Sesi melintasi akhir periode
+   tidak diprorata; pengisian tepat pada end tidak masuk periode.
+6. KM-007 memiliki dua breakdown overlap dengan downtime **48 jam**, bukan 71.
+   Irisan hari berikutnya tetap **24 jam** walaupun tidak ada kejadian baru yang
+   reported_at-nya masuk hari itu. Breakdown terbuka KM-002 menghasilkan 24 jam
+   dalam periode seed. WO-007 menyajikan jadwal, status, biaya Rp1.500.000, dan
+   relasi unit; filter depot kini tidak diklaim sebagai atribusi historis.
+7. Database probe dengan identity mulai **9007199254740993** mempertahankan ID
+   string utuh. Referensi hasil ditelusuri ke record nyata. Database menolak write
+   dalam transaksi service dan sesi memakai UTC. Lebih dari 200 fuel entry
+   menghasilkan RESULT_TOO_LARGE tanpa agregat terpotong; koneksi gagal menjadi
+   SERVICE_UNAVAILABLE yang tidak membocorkan detail koneksi.
+
+8. OpenAI dan OpenRouter masing-masing menyelesaikan alur HTTP → queue → worker
+   → lima tool → jawaban. Hasil tool tersimpan pada checkpoint diperiksa langsung:
+   3 trip, 20 L/100 km, satu WO, downtime 48 jam, dan depot_filter null ketika
+   tidak diminta. Replay request_key mengembalikan run yang sama. Deskripsi input
+   dan prompt menegaskan agar agent tidak menyalin depot kini ke filter historis.
+
+9. `make check` lulus (Ruff, format, mypy 46 file, ESLint, TypeScript,
+   Prettier); `make build` lulus (React dan image API/worker/migrate/web).
+   Stack development di-restart agar worker memuat kelima tool; readiness API
+   9000 dan proxy frontend 5173 mengembalikan 200. Tidak ada commit/push atau
+   deployment Dokploy pada tiket ini.
+
+Untuk mengulangi walkthrough melalui API, jalankan `make dev`, buat thread lewat
+`POST /api/chat/threads`, lalu kirim pesan dengan request_key baru melalui
+`POST /api/chat/threads/{thread_id}/messages`, misalnya:
+
+> Gunakan kelima tool armada. Cari KM-001, ambil aktivitas dan analisis BBM
+> KM-001 untuk [2026-08-22T00:00:00Z,2026-08-25T00:00:00Z). Ambil semua riwayat
+> WO KM-007 serta breakdown/downtime KM-007 untuk
+> [2026-09-01T00:00:00Z,2026-09-04T00:00:00Z). Ringkas metode, coverage, angka,
+> dan referensi tabel/id. Jangan mengasumsikan filter depot yang tidak diminta.
+
+Baca snapshot/run/events dari endpoint thread yang sama. Lima tool harus berhasil;
+aktivitas memiliki 3 trip, estimasi BBM 20 L/100 km, biaya pengisian Rp1.500.000,
+WO-007 satu record, dan downtime KM-007 48 jam. UI chat/citation reader, memory,
+RAG, recovery crash, dan deployment Dokploy tetap mengikuti tiket masing-masing.

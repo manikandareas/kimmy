@@ -12,6 +12,7 @@ from langgraph.errors import GraphRecursionError
 
 from kimmy.agent.context import AgentContext
 from kimmy.agent.factory import AgentGraph, build_agent
+from kimmy.agent.tools import fleet_tools
 from kimmy.chat.service import ChatService
 from kimmy.config import Settings
 from kimmy.llm import ModelConfigurationError, chat_model
@@ -160,7 +161,12 @@ class AgentExecutor:
                     thread_id, user_id, run_id
                 )
                 async with chat_model(self.settings) as model:
-                    agent = build_agent(model, self.saver, self.settings)
+                    agent = build_agent(
+                        model,
+                        self.saver,
+                        self.settings,
+                        fleet_tools(self.service.engine),
+                    )
                     answer, checkpoint_id = await stream_answer(
                         agent, self.service, context, content, parent, self.settings
                     )
