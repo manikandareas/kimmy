@@ -231,11 +231,73 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActivityData */
+        ActivityData: {
+            vehicle: components["schemas"]["VehicleSummary"];
+            /** Trips */
+            trips: components["schemas"]["TripView"][];
+            /** Sessions */
+            sessions: components["schemas"]["SessionView"][];
+            operations: components["schemas"]["OperationReport"];
+        };
         /** Admission */
         Admission: {
             run: components["schemas"]["RunView"];
             /** Replayed */
             replayed: boolean;
+        };
+        /** BreakdownData */
+        BreakdownData: {
+            vehicle: components["schemas"]["VehicleSummary"];
+            /** Events */
+            events: components["schemas"]["BreakdownView"][];
+            downtime: components["schemas"]["DowntimeReport"];
+            /**
+             * Historical Depot Available
+             * @default false
+             * @constant
+             */
+            historical_depot_available: false;
+        };
+        /** BreakdownView */
+        BreakdownView: {
+            /**
+             * Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            id: string;
+            /**
+             * Vehicle Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            vehicle_id: string;
+            /**
+             * Reported At
+             * Format: date-time
+             */
+            reported_at: string;
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /**
+             * Out Of Service At
+             * Format: date-time
+             */
+            out_of_service_at: string;
+            /** Returned To Service At */
+            returned_to_service_at: string | null;
+            /** Component */
+            component: string;
+            /** Symptom */
+            symptom: string;
+            /** Confirmed Cause */
+            confirmed_cause: string | null;
+            /** Severity */
+            severity: string;
+            /** Work Order Id */
+            work_order_id: string | null;
         };
         /** Citation */
         Citation: {
@@ -279,6 +341,19 @@ export interface components {
         DemoIdentity: {
             /** User Id */
             user_id: string;
+        };
+        /** DowntimeReport */
+        DowntimeReport: {
+            /**
+             * Method
+             * @default union of out-of-service intervals clipped to period and as_of
+             */
+            method: string;
+            observed_period: components["schemas"]["Period"];
+            /** Record Refs */
+            record_refs: components["schemas"]["RecordRef"][];
+            /** Seconds */
+            seconds: string;
         };
         /** ErrorResponse */
         ErrorResponse: {
@@ -324,6 +399,96 @@ export interface components {
              */
             created_at: string;
         };
+        /** FuelData */
+        FuelData: {
+            vehicle: components["schemas"]["VehicleSummary"];
+            /** Entries */
+            entries: components["schemas"]["FuelView"][];
+            analysis: components["schemas"]["FuelReport"];
+        };
+        /** FuelInterval */
+        FuelInterval: {
+            baseline_record_ref: components["schemas"]["RecordRef"];
+            /** Volume Record Refs */
+            volume_record_refs: components["schemas"]["RecordRef"][];
+            /**
+             * Vehicle Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            vehicle_id: string;
+            observed_period: components["schemas"]["Period"];
+            /** Record Refs */
+            record_refs: components["schemas"]["RecordRef"][];
+            /** Depot Ids */
+            depot_ids: string[];
+            /** Liters */
+            liters: string;
+            /** Distance Km */
+            distance_km: string;
+            /** Liters Per 100 Km */
+            liters_per_100_km: string;
+        };
+        /** FuelReport */
+        FuelReport: {
+            /**
+             * Method
+             * @default full_to_full; assumes all interval refills recorded
+             */
+            method: string;
+            observed_period: components["schemas"]["Period"];
+            /** Record Refs */
+            record_refs: components["schemas"]["RecordRef"][];
+            /** Coverage */
+            coverage: components["schemas"]["Observation"][];
+            /** Spending Idr */
+            spending_idr: string;
+            /** Intervals */
+            intervals: components["schemas"]["FuelInterval"][];
+            /** Liters Per 100 Km */
+            liters_per_100_km: string | null;
+            /** Late Record Refs */
+            late_record_refs: components["schemas"]["RecordRef"][];
+        };
+        /** FuelView */
+        FuelView: {
+            /**
+             * Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            id: string;
+            /**
+             * Vehicle Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            vehicle_id: string;
+            /**
+             * Depot Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            depot_id: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /** Liters */
+            liters: string;
+            /** Unit Price Idr */
+            unit_price_idr: string;
+            /** Odometer Km */
+            odometer_km: string | null;
+            /** Fill Type */
+            fill_type: string;
+            /** Meter Valid */
+            meter_valid: boolean;
+            /** Reset Baseline */
+            reset_baseline: boolean;
+        };
         /** HealthResponse */
         HealthResponse: {
             /**
@@ -332,6 +497,56 @@ export interface components {
              * @constant
              */
             status: "ok";
+        };
+        /** MaintenanceData */
+        MaintenanceData: {
+            vehicle: components["schemas"]["VehicleSummary"];
+            /** Orders */
+            orders: components["schemas"]["MaintenanceView"][];
+            /**
+             * Historical Depot Available
+             * @default false
+             * @constant
+             */
+            historical_depot_available: false;
+        };
+        /** MaintenanceView */
+        MaintenanceView: {
+            /**
+             * Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            id: string;
+            /**
+             * Vehicle Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            vehicle_id: string;
+            /** Work Order Number */
+            work_order_number: string;
+            /** Type */
+            type: string;
+            /** Status */
+            status: string;
+            /**
+             * Opened At
+             * Format: date-time
+             */
+            opened_at: string;
+            /** Scheduled At */
+            scheduled_at: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Due At */
+            due_at: string | null;
+            /** Service Odometer Km */
+            service_odometer_km: string | null;
+            /** Due Odometer Km */
+            due_odometer_km: string | null;
+            /** Total Cost Idr */
+            total_cost_idr: string | null;
         };
         /** MemoryCreate */
         MemoryCreate: {
@@ -415,6 +630,78 @@ export interface components {
              */
             created_at: string;
         };
+        /** Observation */
+        Observation: {
+            record_ref: components["schemas"]["RecordRef"];
+            /** Reasons */
+            reasons: string[];
+            /** Engine On Seconds */
+            engine_on_seconds?: number | null;
+        };
+        /** OperationReport */
+        OperationReport: {
+            /**
+             * Method
+             * @default closed complete sessions wholly within period; no prorating
+             */
+            method: string;
+            observed_period: components["schemas"]["Period"];
+            /** Record Refs */
+            record_refs: components["schemas"]["RecordRef"][];
+            /** Coverage */
+            coverage: components["schemas"]["Observation"][];
+            /** Complete Engine On Seconds */
+            complete_engine_on_seconds: number | null;
+            /** Complete Idle Seconds */
+            complete_idle_seconds: number | null;
+            /** All Selected Sessions Complete */
+            all_selected_sessions_complete: boolean;
+        };
+        /** Period */
+        Period: {
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+        };
+        /** RecordRef */
+        RecordRef: {
+            /** Table */
+            table: string;
+            /**
+             * Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            id: string;
+        };
+        /** RunActivity */
+        RunActivity: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Message Id
+             * Format: uuid
+             */
+            message_id: string;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+            /** Model Message Id */
+            model_message_id?: string | null;
+            /** Tools */
+            tools?: components["schemas"]["ToolActivity"][];
+        };
         /** RunView */
         RunView: {
             /**
@@ -449,12 +736,50 @@ export interface components {
             /** Finished At */
             finished_at: string | null;
         };
+        /** SearchData */
+        SearchData: {
+            /** Vehicles */
+            vehicles: components["schemas"]["VehicleSummary"][];
+            /** Next Offset */
+            next_offset: number | null;
+        };
         /** SendMessage */
         SendMessage: {
             /** Request Key */
             request_key: string;
             /** Content */
             content: string;
+        };
+        /** SessionView */
+        SessionView: {
+            /**
+             * Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            id: string;
+            /**
+             * Vehicle Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            vehicle_id: string;
+            /**
+             * Depot Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            depot_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Ended At */
+            ended_at: string | null;
+            /** Engine On Seconds */
+            engine_on_seconds: number | null;
+            /** Idle Seconds */
+            idle_seconds: number | null;
+            /** Coverage Status */
+            coverage_status: string;
         };
         /** Snapshot */
         Snapshot: {
@@ -467,6 +792,8 @@ export interface components {
             through_seq: string;
             /** Before Seq */
             before_seq: string | null;
+            /** Activities */
+            activities?: components["schemas"]["RunActivity"][];
         };
         /** SourceChunk */
         SourceChunk: {
@@ -524,6 +851,221 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** ToolActivity */
+        ToolActivity: {
+            /** Tool Call Id */
+            tool_call_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Status
+             * @default running
+             * @enum {string}
+             */
+            status: "running" | "success" | "error";
+            /** Result */
+            result?: components["schemas"]["ToolResult_SearchData_"] | components["schemas"]["ToolResult_ActivityData_"] | components["schemas"]["ToolResult_FuelData_"] | components["schemas"]["ToolResult_MaintenanceData_"] | components["schemas"]["ToolResult_BreakdownData_"] | components["schemas"]["ToolFailure"] | null;
+        };
+        /** ToolFailure */
+        ToolFailure: {
+            /**
+             * Status
+             * @default ERROR
+             * @constant
+             */
+            status: "ERROR";
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "INVALID_INPUT" | "VEHICLE_NOT_FOUND" | "SERVICE_UNAVAILABLE" | "RESULT_TOO_LARGE";
+            /** Message */
+            message: string;
+        };
+        /** ToolResult[ActivityData] */
+        ToolResult_ActivityData_: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "OK" | "NO_DATA";
+            /** Method */
+            method: string;
+            /** Record Refs */
+            record_refs: components["schemas"]["RecordRef"][];
+            observed_period: components["schemas"]["Period"] | null;
+            /** Coverage */
+            coverage: string[];
+            /**
+             * Depot Filter Basis
+             * @enum {string}
+             */
+            depot_filter_basis: "snapshot_depot" | "current_vehicle_depot";
+            /** Depot Filter */
+            depot_filter: string | null;
+            data: components["schemas"]["ActivityData"];
+        };
+        /** ToolResult[BreakdownData] */
+        ToolResult_BreakdownData_: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "OK" | "NO_DATA";
+            /** Method */
+            method: string;
+            /** Record Refs */
+            record_refs: components["schemas"]["RecordRef"][];
+            observed_period: components["schemas"]["Period"] | null;
+            /** Coverage */
+            coverage: string[];
+            /**
+             * Depot Filter Basis
+             * @enum {string}
+             */
+            depot_filter_basis: "snapshot_depot" | "current_vehicle_depot";
+            /** Depot Filter */
+            depot_filter: string | null;
+            data: components["schemas"]["BreakdownData"];
+        };
+        /** ToolResult[FuelData] */
+        ToolResult_FuelData_: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "OK" | "NO_DATA";
+            /** Method */
+            method: string;
+            /** Record Refs */
+            record_refs: components["schemas"]["RecordRef"][];
+            observed_period: components["schemas"]["Period"] | null;
+            /** Coverage */
+            coverage: string[];
+            /**
+             * Depot Filter Basis
+             * @enum {string}
+             */
+            depot_filter_basis: "snapshot_depot" | "current_vehicle_depot";
+            /** Depot Filter */
+            depot_filter: string | null;
+            data: components["schemas"]["FuelData"];
+        };
+        /** ToolResult[MaintenanceData] */
+        ToolResult_MaintenanceData_: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "OK" | "NO_DATA";
+            /** Method */
+            method: string;
+            /** Record Refs */
+            record_refs: components["schemas"]["RecordRef"][];
+            observed_period: components["schemas"]["Period"] | null;
+            /** Coverage */
+            coverage: string[];
+            /**
+             * Depot Filter Basis
+             * @enum {string}
+             */
+            depot_filter_basis: "snapshot_depot" | "current_vehicle_depot";
+            /** Depot Filter */
+            depot_filter: string | null;
+            data: components["schemas"]["MaintenanceData"];
+        };
+        /** ToolResult[SearchData] */
+        ToolResult_SearchData_: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "OK" | "NO_DATA";
+            /** Method */
+            method: string;
+            /** Record Refs */
+            record_refs: components["schemas"]["RecordRef"][];
+            observed_period: components["schemas"]["Period"] | null;
+            /** Coverage */
+            coverage: string[];
+            /**
+             * Depot Filter Basis
+             * @enum {string}
+             */
+            depot_filter_basis: "snapshot_depot" | "current_vehicle_depot";
+            /** Depot Filter */
+            depot_filter: string | null;
+            data: components["schemas"]["SearchData"];
+        };
+        /** TripView */
+        TripView: {
+            /**
+             * Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            id: string;
+            /**
+             * Vehicle Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            vehicle_id: string;
+            /**
+             * Depot Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            depot_id: string;
+            /** Trip Number */
+            trip_number: string;
+            /** Origin */
+            origin: string;
+            /** Destination */
+            destination: string;
+            /** Actual Departure At */
+            actual_departure_at: string | null;
+            /** Actual Arrival At */
+            actual_arrival_at: string | null;
+            /** Status */
+            status: string;
+            /** Start Odometer Km */
+            start_odometer_km: string;
+            /** End Odometer Km */
+            end_odometer_km: string | null;
+            /** Distance Km */
+            distance_km?: string | null;
+        };
+        /** VehicleSummary */
+        VehicleSummary: {
+            /**
+             * Vehicle Id
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            vehicle_id: string;
+            /** Unit Code */
+            unit_code: string;
+            /** Plate Number */
+            plate_number: string;
+            /**
+             * Current Vehicle Depot
+             * @description Positive PostgreSQL bigint as a decimal string
+             */
+            current_vehicle_depot: string;
+            /** Depot Code */
+            depot_code: string;
+            /** Depot Name */
+            depot_name: string;
+            /** Depot Timezone */
+            depot_timezone: string;
+            /**
+             * Technical Status
+             * @enum {string}
+             */
+            technical_status: "breakdown" | "maintenance" | "maintenance_pending" | "operational";
+            /**
+             * Status As Of
+             * Format: date-time
+             */
+            status_as_of: string;
         };
         /** @description Positive PostgreSQL bigint as a decimal string */
         FleetId: string;

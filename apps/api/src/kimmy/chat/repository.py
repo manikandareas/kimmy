@@ -132,6 +132,32 @@ class ChatRepository:
             )
         )
 
+    async def activity(
+        self, thread_id: UUID, message_ids: list[UUID], through_seq: int
+    ) -> tuple[list[Run], list[Event]]:
+        runs = list(
+            await self.session.scalars(
+                select(Run).where(
+                    Run.thread_id == thread_id, Run.message_id.in_(message_ids)
+                )
+            )
+        )
+        events = list(
+            await self.session.scalars(
+                select(Event)
+                .where(
+                    Event.thread_id == thread_id,
+                    Event.run_id.in_([run.id for run in runs]),
+                    Event.seq <= through_seq,
+                    Event.kind.in_(
+                        ("agent.text_delta", "tool.requested", "tool.completed")
+                    ),
+                )
+                .order_by(Event.seq)
+            )
+        )
+        return runs, events
+
     async def create_run(
         self, thread: Thread, request_key: str, content: str
     ) -> tuple[Run, Message]:

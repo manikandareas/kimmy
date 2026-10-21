@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from kimmy.chat.activity import RunActivity
 from kimmy.knowledge.schemas import Citation
 
 # Cursors are decimal strings on the wire, just like other PostgreSQL bigints.
@@ -83,6 +84,7 @@ class Snapshot(BaseModel):
     latest_run: RunView | None
     through_seq: Cursor
     before_seq: Cursor | None
+    activities: list[RunActivity] = Field(default_factory=list)
 
 
 class EventView(BaseModel):

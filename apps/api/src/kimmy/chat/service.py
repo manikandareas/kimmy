@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kimmy.agent.context import AgentContext
+from kimmy.chat.activity import project_activity
 from kimmy.chat.models import Message, Thread
 from kimmy.chat.repository import ChatRepository
 from kimmy.chat.schemas import (
@@ -147,6 +148,9 @@ class ChatService:
             page = messages[:limit]
             active = await repo.active_run(thread_id)
             latest = await repo.latest_run(thread_id)
+            runs, activity_events = await repo.activity(
+                thread_id, [m.id for m in page if m.role == "user"], thread.last_seq
+            )
             return Snapshot(
                 thread=thread_view(thread),
                 messages=[message_view(m) for m in reversed(page)],
@@ -154,6 +158,7 @@ class ChatService:
                 latest_run=RunView.model_validate(latest) if latest else None,
                 through_seq=str(thread.last_seq),
                 before_seq=str(page[-1].seq) if len(messages) > limit else None,
+                activities=project_activity(runs, activity_events),
             )
 
     async def get_run(self, thread_id: UUID, user_id: str, run_id: UUID) -> RunView:

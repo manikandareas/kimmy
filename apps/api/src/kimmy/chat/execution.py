@@ -16,6 +16,7 @@ from kimmy.agent.factory import AgentGraph, build_agent
 from kimmy.agent.tools import fleet_tools
 from kimmy.agent.tools.memory import memory_tools
 from kimmy.agent.tools.search_knowledge import build_tool as knowledge_tool
+from kimmy.chat.activity import FLEET_RESULT, FLEET_TOOLS
 from kimmy.chat.service import ChatService
 from kimmy.config import Settings
 from kimmy.errors import DomainError
@@ -127,13 +128,23 @@ async def stream_answer(
                         ):
                             artifact = SearchResult.model_validate(message.artifact)
                             received.update((c.chunk_id, c) for c in artifact.citations)
+                        result = None
+                        if message.name in FLEET_TOOLS and isinstance(
+                            message.content, str
+                        ):
+                            result = FLEET_RESULT.validate_json(
+                                message.content
+                            ).model_dump(mode="json")
                         await service.progress(
                             context,
                             "tool.completed",
                             {
                                 "tool_call_id": message.tool_call_id,
                                 "name": message.name,
-                                "status": message.status,
+                                "status": "error"
+                                if result and result.get("status") == "ERROR"
+                                else message.status,
+                                "result": result,
                             },
                         )
                         logger.info(
