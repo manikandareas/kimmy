@@ -35,6 +35,10 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment: *backend-environment
+    networks:
+      default:
+        aliases:
+          - kimmy-api
     depends_on:
       postgres:
         condition: service_healthy
