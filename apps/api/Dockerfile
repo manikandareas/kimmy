@@ -3,6 +3,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.0 /uv /usr/local/bin/uv
 WORKDIR /app
 COPY apps/api/pyproject.toml apps/api/uv.lock ./
 COPY apps/api/src ./src
+COPY apps/api/alembic.ini ./alembic.ini
+COPY apps/api/migrations ./migrations
 RUN uv sync --frozen --no-dev
 RUN useradd --create-home app
 USER app

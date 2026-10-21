@@ -1,5 +1,3 @@
-"""Run host development commands with environment isolated from the web process."""
-
 import os
 import signal
 import subprocess
@@ -30,6 +28,38 @@ def main() -> int:
         f"postgresql+psycopg://kimmy:{quote(password, safe='')}@127.0.0.1:54329/kimmy"
     )
     commands = {
+        "migrate": (
+            [
+                "uv",
+                "run",
+                "--project",
+                "apps/api",
+                "alembic",
+                "-c",
+                "apps/api/alembic.ini",
+                "upgrade",
+                "head",
+            ],
+            api_env,
+        ),
+        "seed": (
+            ["uv", "run", "--project", "apps/api", "python", "-m", "kimmy.cli", "seed"],
+            api_env,
+        ),
+        "fleet-report": (
+            [
+                "uv",
+                "run",
+                "--project",
+                "apps/api",
+                "python",
+                "-m",
+                "kimmy.cli",
+                "fleet-report",
+                *sys.argv[2:],
+            ],
+            api_env,
+        ),
         "api": (
             [
                 "uv",
@@ -51,7 +81,7 @@ def main() -> int:
             os.environ.copy(),
         ),
     }
-    selected = [sys.argv[1]] if len(sys.argv) > 1 else list(commands)
+    selected = [sys.argv[1]] if len(sys.argv) > 1 else ["api", "web"]
     children: list[subprocess.Popen[bytes]] = []
     stopping = False
 
