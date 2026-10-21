@@ -273,11 +273,3 @@ Module boundaries are strict: routers handle HTTP, services own domain rules, re
 5. "Which fuel entries were recorded more than 24 hours after they occurred?"
 6. Refresh the page while an answer is streaming - the same answer reappears without duplication.
 7. "Forget my favorite depot note." The next thread no longer uses that note.
-
----
-
-## V1 scope boundaries
-
-Included: chat threads/history, durable streaming, visible tool activity, a citation reader, a memory panel, the fleet seed, indexing of the three SOPs, OpenAI/OpenRouter providers, and Docker Compose deployment on Dokploy.
-
-Out of V1 scope: testing frameworks and automated evals, Playwright, a fleet dashboard/CRUD, real-time GPS, real telemetry integrations, fleet data import/reconciliation, upload/OCR, multi-agent setups, and any action that mutates operational data (all fleet data is read-only for the agent).
