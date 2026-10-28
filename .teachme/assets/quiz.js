@@ -1,0 +1,1 @@
+document.querySelectorAll('.quiz').forEach(q=>{q.querySelectorAll('button').forEach((b,i)=>b.addEventListener('click',()=>{q.querySelector('[role=status]').textContent=(i===Number(q.dataset.correct)?'Tepat. ':'Coba telusuri kembali. ')+q.dataset.feedback;}));});
