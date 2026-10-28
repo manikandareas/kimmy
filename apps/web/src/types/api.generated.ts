@@ -768,6 +768,11 @@ export interface components {
              */
             message_id: string;
             /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "completed" | "failed" | "cancelled";
+            /**
              * Text
              * @default
              */

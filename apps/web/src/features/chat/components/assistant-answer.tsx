@@ -23,18 +23,31 @@ export function AssistantAnswer({
   onSource: (citation: Citation) => void;
 }) {
   const text = message?.content ?? activity?.text ?? "";
-  const visible = useSmoothText(text, !message, revealEpoch);
+  const failed = !message && activity?.status === "failed";
+  const visible = useSmoothText(text, !message && !failed, revealEpoch);
   useEffect(() => {
     onRevealing?.(visible !== text);
   }, [visible, text, onRevealing]);
   useEffect(() => () => onRevealing?.(false), [onRevealing]);
   return (
     <article
-      aria-label={message ? "Jawaban Kimmy" : "Jawaban sedang diproses"}
+      aria-label={
+        message
+          ? "Jawaban Kimmy"
+          : failed
+            ? "Draf jawaban gagal"
+            : "Jawaban sedang diproses"
+      }
       data-message-id={message?.id}
       className="mb-10 min-w-0 text-sm leading-7"
     >
       <ToolActivity tools={activity?.tools ?? []} />
+      {failed && (
+        <p role="status" className="mb-3 text-sm text-muted-foreground">
+          Jawaban belum selesai dan belum lolos validasi. Sebagian informasi
+          mungkin tidak lengkap.
+        </p>
+      )}
       {visible ? (
         <MessageContent
           content={visible}

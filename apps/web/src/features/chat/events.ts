@@ -40,12 +40,16 @@ export function applyEvent(state: Snapshot, event: ChatEvent): Snapshot {
       activity = {
         run_id: run.id,
         message_id: run.message_id,
+        status: run.status,
         text: "",
         tools: [],
         model_message_id: null,
       };
       next.activities!.push(activity);
     }
+    next.activities = next.activities!.map((a) =>
+      a.run_id === run.id ? { ...a, status: run.status } : a,
+    );
     if (event.kind === "run.queued")
       next.activities = next.activities!.map((a) =>
         a.run_id === run.id
@@ -57,7 +61,7 @@ export function applyEvent(state: Snapshot, event: ChatEvent): Snapshot {
         a.run_id === run.id
           ? {
               ...a,
-              text: "",
+              text: run.status === "failed" ? a.text : "",
               tools: a.tools?.map((tool) =>
                 tool.status === "running"
                   ? { ...tool, status: "error" as const }

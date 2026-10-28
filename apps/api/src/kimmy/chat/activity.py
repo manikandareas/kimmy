@@ -46,6 +46,7 @@ class ToolActivity(BaseModel):
 class RunActivity(BaseModel):
     run_id: UUID
     message_id: UUID
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
     text: str = ""
     model_message_id: str | None = None
     tools: list[ToolActivity] = Field(default_factory=list)
@@ -53,16 +54,18 @@ class RunActivity(BaseModel):
 
 def project_activity(runs: list[Run], events: list[Event]) -> list[RunActivity]:
     activities = {
-        run.id: RunActivity(run_id=run.id, message_id=run.message_id) for run in runs
+        run.id: RunActivity(run_id=run.id, message_id=run.message_id, status=run.status)
+        for run in runs
     }
     active_ids = {run.id for run in runs if run.status in {"queued", "running"}}
+    visible_ids = active_ids | {run.id for run in runs if run.status == "failed"}
     for event in events:
         item = activities[event.run_id]
         if event.kind == "run.queued":
             item.text = ""
             item.model_message_id = None
             item.tools = []
-        elif event.kind == "agent.text_delta" and event.run_id in active_ids:
+        elif event.kind == "agent.text_delta" and event.run_id in visible_ids:
             model_id = event.payload.get("model_message_id")
             if model_id != item.model_message_id:
                 item.text = ""

@@ -266,7 +266,10 @@ class AgentExecutor:
             GraphRecursionError,
         ):
             code = "AGENT_LIMIT_EXCEEDED"
-        except InvalidAgentResult:
+        except InvalidAgentResult as error:
+            logger.warning(
+                "Invalid agent result run_id=%s reason=%s", run_id, str(error)
+            )
             code = "AGENT_INVALID_RESULT"
         except asyncio.CancelledError:
             # Leave the durable lease for the recovery loop after shutdown.

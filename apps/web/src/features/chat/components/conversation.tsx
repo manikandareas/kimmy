@@ -183,7 +183,11 @@ export function Conversation({
                   >
                     {message.content}
                   </article>
-                  {(answer || run || activity?.tools?.length) && (
+                  {(answer ||
+                    run ||
+                    activity?.text ||
+                    activity?.status === "failed" ||
+                    activity?.tools?.length) && (
                     <AssistantAnswer
                       onRevealing={
                         index >= state.messages.length - 2

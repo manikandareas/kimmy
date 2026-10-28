@@ -12,7 +12,11 @@ export function useSmoothText(
   useEffect(() => {
     const skip = previousEpoch.current !== revealEpoch;
     previousEpoch.current = revealEpoch;
-    if (skip || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (
+      !streaming ||
+      skip ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
       shown.current = text;
       setVisible(text);
       return;
@@ -45,6 +49,6 @@ export function useSmoothText(
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [text, revealEpoch]);
+  }, [text, streaming, revealEpoch]);
   return visible;
 }
